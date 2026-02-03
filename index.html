@@ -235,9 +235,9 @@
   // FOUNTAIN DECODER (LT Code style)
   // ========================================
   class FountainDecoder {
-    constructor(id, kind, n, bs, len, hash) {
+    constructor(id, type, n, bs, len, hash) {
       this.id = id;
-      this.kind = kind;
+      this.type = type;
       this.n = n;           // block count
       this.bs = bs;         // block size
       this.len = len;       // original length
@@ -398,11 +398,11 @@
     const payload = await decoder.reconstruct();
     if (!payload) return;
 
-    if (decoder.kind === 'mjs' || decoder.kind === 'js') {
+    if (decoder.type === 'mjs' || decoder.type === 'js') {
       await activateModule(decoder.id, payload);
-    } else if (decoder.kind === 'html') {
+    } else if (decoder.type === 'html') {
       activateHTML(decoder.id, payload);
-    } else if (decoder.kind === 'json') {
+    } else if (decoder.type === 'json') {
       activateJSON(decoder.id, payload);
     }
   }
@@ -452,13 +452,13 @@
     try { data = JSON.parse(raw); } catch { return; }
     if (!data) return;
 
-    const { id, kind, n, bs, len, h, r, k, c } = data;
-    if (!id || !kind || !n || !bs || !len || !h || r === undefined || !k || !c) return;
+    const { i, t, n, b, l, h, r, k, c } = data;
+    if (!i || !t || !n || !b || !l || !h || r === undefined || !k || !c) return;
 
-    let decoder = artifacts.get(id);
+    let decoder = artifacts.get(i);
     if (!decoder) {
-      decoder = new FountainDecoder(id, kind, n, bs, len, h);
-      artifacts.set(id, decoder);
+      decoder = new FountainDecoder(i, t, n, b, l, h);
+      artifacts.set(i, decoder);
     }
 
     const complete = decoder.addSymbol(r, k, b64url(c));

@@ -31,11 +31,11 @@ Each QR code contains a JSON object:
 
 ```json
 {
-  "id": "myapp",
-  "kind": "mjs",
+  "i": "myapp",
+  "t": "mjs",
   "n": 12,
-  "bs": 128,
-  "len": 1450,
+  "b": 128,
+  "l": 1450,
   "h": "sha256hex...",
   "r": 3007641763,
   "k": 2,
@@ -45,11 +45,11 @@ Each QR code contains a JSON object:
 
 | Field | Description |
 |-------|-------------|
-| `id` | Artifact identifier |
-| `kind` | `mjs`, `js`, `html`, or `json` |
+| `i` | Artifact identifier |
+| `t` | Type: `mjs`, `js`, `html`, or `json` |
 | `n` | Total block count |
-| `bs` | Block size in bytes |
-| `len` | Original payload length |
+| `b` | Block size in bytes |
+| `l` | Original payload length |
 | `h` | SHA-256 hash (hex) |
 | `r` | PRNG seed (Mulberry32) |
 | `k` | Degree (number of blocks XORed) |
