@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <title>QR Bootstrap</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+      background: #000;
+      color: #0f0;
+      min-height: 100vh;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #camera-view {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+      filter: saturate(0.3) brightness(0.8);
+    }
+    #blur-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(16px) brightness(0.3);
+      -webkit-backdrop-filter: blur(16px) brightness(0.3);
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100%25' height='100%25'%3E%3Cdefs%3E%3Cmask id='m'%3E%3Crect fill='white' width='100%25' height='100%25'/%3E%3Crect fill='black' x='50%25' y='50%25' width='220' height='220' transform='translate(-110,-110)'/%3E%3C/mask%3E%3C/defs%3E%3Crect fill='black' width='100%25' height='100%25' mask='url(%23m)'/%3E%3C/svg%3E");
+      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100%25' height='100%25'%3E%3Cdefs%3E%3Cmask id='m'%3E%3Crect fill='white' width='100%25' height='100%25'/%3E%3Crect fill='black' x='50%25' y='50%25' width='220' height='220' transform='translate(-110,-110)'/%3E%3C/mask%3E%3C/defs%3E%3Crect fill='black' width='100%25' height='100%25' mask='url(%23m)'/%3E%3C/svg%3E");
+      mask-size: 100% 100%;
+      -webkit-mask-size: 100% 100%;
+    }
+    #scan-frame {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 220px;
+      height: 220px;
+      z-index: 2;
+      pointer-events: none;
+      border: 1px solid rgba(0, 255, 0, 0.15);
+      box-shadow: 0 0 30px rgba(0, 255, 0, 0.1), inset 0 0 30px rgba(0, 255, 0, 0.05);
+    }
+    #scan-frame::before, #scan-frame::after,
+    #scan-frame b::before, #scan-frame b::after {
+      content: '';
+      position: absolute;
+      width: 36px;
+      height: 36px;
+      border: 2px solid #0f0;
+      filter: drop-shadow(0 0 4px #0f0);
+    }
+    #scan-frame::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+    #scan-frame::after { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
+    #scan-frame b { display: block; position: absolute; inset: 0; }
+    #scan-frame b::before { bottom: -1px; left: -1px; top: auto; border-right: 0; border-top: 0; }
+    #scan-frame b::after { bottom: -1px; right: -1px; top: auto; border-left: 0; border-top: 0; }
+    @keyframes scanline {
+      0%, 100% { top: 0; opacity: 1; }
+      50% { top: calc(100% - 2px); opacity: 0.5; }
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 30px rgba(0, 255, 0, 0.1), inset 0 0 30px rgba(0, 255, 0, 0.05); }
+      50% { box-shadow: 0 0 60px rgba(0, 255, 0, 0.6), inset 0 0 40px rgba(0, 255, 0, 0.2); }
+      100% { box-shadow: 0 0 30px rgba(0, 255, 0, 0.1), inset 0 0 30px rgba(0, 255, 0, 0.05); }
+    }
+    #scan-frame.pulse { animation: pulse 0.15s ease-out; }
+    #scan-frame i {
+      display: block;
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #0f0, transparent);
+      box-shadow: 0 0 8px #0f0;
+      animation: scanline 2s ease-in-out infinite;
+      opacity: 0.7;
+    }
+    #progress {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: #0f0;
+      box-shadow: 0 0 10px #0f0;
+      z-index: 3;
+      transition: width 0.3s;
+      width: 0;
+    }
+    #hud {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 3;
+      font-size: 11px;
+      color: #0f0;
+      text-shadow: 0 0 8px #0f0;
+      text-align: center;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.5s;
+      letter-spacing: 2px;
+    }
+    #hud.visible { opacity: 0.8; }
+    #no-support {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      font-size: 12px;
+      color: #0f04;
+      text-align: center;
+      padding: 40px;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <video id="camera-view" playsinline muted autoplay></video>
+  <div id="blur-layer"></div>
+  <div id="scan-frame"><b></b><i></i></div>
+  <div id="progress"></div>
+  <div id="hud"></div>
+  
+  <div id="no-support" class="hidden">Camera or BarcodeDetector unavailable</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ========================================
+  // FEATURE DETECTION
+  // ========================================
+  const hasBarcode = 'BarcodeDetector' in window;
+  const hasCrypto = crypto && crypto.subtle;
+  const hasMedia = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+
+  if (!hasBarcode || !hasCrypto || !hasMedia) {
+    document.getElementById('no-support').classList.remove('hidden');
+    return;
+  }
+
+  // ========================================
+  // PWA REGISTRATION
+  // ========================================
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
+  // ========================================
+  // DOM ELEMENTS
+  // ========================================
+  const video = document.getElementById('camera-view');
+  const progressEl = document.getElementById('progress');
+  const hudEl = document.getElementById('hud');
+  const frameEl = document.getElementById('scan-frame');
+
+  // ========================================
+  // STATE
+  // ========================================
+  const artifacts = new Map();
+  const loadedModules = new Map();
+  let scanning = false;
+  let stream = null;
+  let detector = null;
+  let canvas = null;
+  let ctx = null;
+
+  // ========================================
+  // MINIMAL UI
+  // ========================================
+  function updateProgress() {
+    let totalBlocks = 0, solvedBlocks = 0;
+    for (const dec of artifacts.values()) {
+      totalBlocks += dec.n;
+      solvedBlocks += dec.solved;
+    }
+    if (totalBlocks > 0) {
+      progressEl.style.width = (solvedBlocks / totalBlocks * 100) + '%';
+      hudEl.textContent = `${solvedBlocks}/${totalBlocks}`;
+      hudEl.classList.add('visible');
+    }
+  }
+
+  function log(msg, type = '') {
+    // Silent by default, but available to modules
+    if (type === 'error') console.error(msg);
+  }
+
+  function setStatus() {}
+
+  function startScanner() {
+    if (scanning) return;
+    init();
+  }
+
+  function stopScanner() {
+    scanning = false;
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+  }
+
+  // ========================================
+  // PRNG (Mulberry32)
+  // ========================================
+  function mulberry32(seed) {
+    return () => {
+      seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return (t ^ (t >>> 14)) >>> 0;
+    };
+  }
+
+  // ========================================
+  // FOUNTAIN DECODER (LT Code style)
+  // ========================================
+  class FountainDecoder {
+    constructor(id, kind, n, bs, len, hash) {
+      this.id = id;
+      this.kind = kind;
+      this.n = n;           // block count
+      this.bs = bs;         // block size
+      this.len = len;       // original length
+      this.hash = hash;     // SHA-256 hex
+
+      this.blocks = new Array(n).fill(null);
+      this.pending = [];    // equations not yet simplified
+      this.solved = 0;
+      this.seen = new Set();
+      this.symbolCount = 0;
+      this.startTime = Date.now();
+    }
+
+    // Pick k unique block indices using seed
+    pickBlocks(seed, k) {
+      const rng = mulberry32(seed);
+      const indices = new Set();
+      while (indices.size < k) {
+        indices.add(rng() % this.n);
+      }
+      return Array.from(indices).sort((a, b) => a - b);
+    }
+
+    // XOR two Uint8Arrays
+    xor(a, b) {
+      const out = new Uint8Array(a.length);
+      for (let i = 0; i < a.length; i++) out[i] = a[i] ^ b[i];
+      return out;
+    }
+
+    // Process incoming symbol
+    addSymbol(seed, degree, data) {
+      const key = seed.toString();
+      if (this.seen.has(key)) return false;
+      this.seen.add(key);
+      this.symbolCount++;
+
+      let indices = this.pickBlocks(seed, degree);
+      let rhs = new Uint8Array(data);
+
+      // Substitute known blocks
+      indices = indices.filter(idx => {
+        if (this.blocks[idx]) {
+          rhs = this.xor(rhs, this.blocks[idx]);
+          return false;
+        }
+        return true;
+      });
+
+      // If single unknown, solve immediately
+      if (indices.length === 1) {
+        this._solve(indices[0], rhs);
+        return this.solved === this.n;
+      }
+
+      // Otherwise store as pending equation
+      if (indices.length > 1) {
+        this.pending.push({ indices, rhs });
+      }
+
+      return this.solved === this.n;
+    }
+
+    // Solve a block and propagate
+    _solve(idx, data) {
+      if (this.blocks[idx]) return;
+      this.blocks[idx] = data;
+      this.solved++;
+
+      // Propagate to pending equations
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (let i = this.pending.length - 1; i >= 0; i--) {
+          const eq = this.pending[i];
+          const pos = eq.indices.indexOf(idx);
+          if (pos !== -1) {
+            eq.rhs = this.xor(eq.rhs, data);
+            eq.indices.splice(pos, 1);
+            changed = true;
+
+            if (eq.indices.length === 1) {
+              this.pending.splice(i, 1);
+              this._solve(eq.indices[0], eq.rhs);
+            } else if (eq.indices.length === 0) {
+              this.pending.splice(i, 1);
+            }
+          }
+        }
+        // Check for newly solvable single-block equations
+        for (let i = this.pending.length - 1; i >= 0; i--) {
+          const eq = this.pending[i];
+          if (eq.indices.length === 1 && !this.blocks[eq.indices[0]]) {
+            this.pending.splice(i, 1);
+            this._solve(eq.indices[0], eq.rhs);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    // Reconstruct and verify
+    async reconstruct() {
+      if (this.solved !== this.n) return null;
+
+      // Concatenate blocks
+      const full = new Uint8Array(this.n * this.bs);
+      for (let i = 0; i < this.n; i++) {
+        full.set(this.blocks[i], i * this.bs);
+      }
+
+      // Trim to original length
+      const payload = full.slice(0, this.len);
+
+      // Verify SHA-256
+      const hashBuf = await crypto.subtle.digest('SHA-256', payload);
+      const hashArr = new Uint8Array(hashBuf);
+      let hex = '';
+      for (let i = 0; i < hashArr.length; i++) {
+        hex += ('0' + hashArr[i].toString(16)).slice(-2);
+      }
+
+      if (hex !== this.hash) {
+        log(`Hash mismatch for ${this.id}`, 'error');
+        return null;
+      }
+
+      return payload;
+    }
+
+    stats() {
+      return {
+        solved: this.solved,
+        total: this.n,
+        symbols: this.symbolCount,
+        pending: this.pending.length,
+        elapsed: ((Date.now() - this.startTime) / 1000).toFixed(1)
+      };
+    }
+  }
+
+  // ========================================
+  // BASE64URL DECODE
+  // ========================================
+  function b64url(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    const bin = atob(s);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+
+  // ========================================
+  // MODULE ACTIVATION
+  // ========================================
+  async function activateArtifact(decoder) {
+    const payload = await decoder.reconstruct();
+    if (!payload) return;
+
+    if (decoder.kind === 'mjs' || decoder.kind === 'js') {
+      await activateModule(decoder.id, payload);
+    } else if (decoder.kind === 'html') {
+      activateHTML(decoder.id, payload);
+    } else if (decoder.kind === 'json') {
+      activateJSON(decoder.id, payload);
+    }
+  }
+
+  async function activateModule(id, payload) {
+    const source = new TextDecoder().decode(payload);
+    const blob = new Blob([source], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+
+    try {
+      const mod = await import(url);
+      loadedModules.set(id, mod);
+
+      if (typeof mod.init === 'function') {
+        await mod.init({
+          id,
+          artifacts,
+          modules: loadedModules,
+          log,
+          startScanner,
+          stopScanner
+        });
+      }
+    } catch (e) {
+      log(`Module ${id}: ${e.message}`, 'error');
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function activateHTML(id, payload) {
+    const bin = String.fromCharCode(...payload);
+    location.href = 'data:text/html;base64,' + btoa(bin);
+  }
+
+  function activateJSON(id, payload) {
+    try {
+      loadedModules.set(id, JSON.parse(new TextDecoder().decode(payload)));
+    } catch (e) {}
+  }
+
+  // ========================================
+  // FRAGMENT PROCESSING
+  // ========================================
+  function processFragment(raw) {
+    let data;
+    try { data = JSON.parse(raw); } catch { return; }
+    if (!data || data.t !== 'a') return;
+
+    const { id, kind, n, bs, len, h, r, k, c } = data;
+    if (!id || !kind || !n || !bs || !len || !h || r === undefined || !k || !c) return;
+
+    let decoder = artifacts.get(id);
+    if (!decoder) {
+      decoder = new FountainDecoder(id, kind, n, bs, len, h);
+      artifacts.set(id, decoder);
+    }
+
+    const complete = decoder.addSymbol(r, k, b64url(c));
+    updateProgress();
+    
+    // Pulse feedback
+    frameEl.classList.remove('pulse');
+    void frameEl.offsetWidth;
+    frameEl.classList.add('pulse');
+
+    if (complete) activateArtifact(decoder);
+  }
+
+  // ========================================
+  // SCANNER
+  // ========================================
+  async function init() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+
+      video.srcObject = stream;
+      await video.play();
+
+      canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 640;
+      ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      detector = new BarcodeDetector({ formats: ['qr_code'] });
+      scanning = true;
+      scanLoop();
+    } catch (e) {
+      log('Camera: ' + e.message, 'error');
+    }
+  }
+
+  async function scanLoop() {
+    if (!scanning) return;
+
+    try {
+      if (video.videoWidth > 0) {
+        ctx.drawImage(video, 0, 0, 640, 640);
+        const results = await detector.detect(canvas);
+
+        for (const barcode of results) {
+          const raw = barcode.rawValue || '';
+          if (raw.startsWith('{')) {
+            processFragment(raw);
+          } else if (raw.includes('#')) {
+            const frag = raw.split('#')[1];
+            if (frag) {
+              try { processFragment(atob(frag)); } catch { processFragment(frag); }
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    requestAnimationFrame(scanLoop);
+  }
+
+  // ========================================
+  // AUTO-START
+  // ========================================
+  // Process hash on load (if opened via QR scan)
+  if (location.hash.length > 1) {
+    const frag = location.hash.slice(1);
+    try { processFragment(atob(frag)); } catch { processFragment(frag); }
+  }
+
+  // Auto-start camera
+  init();
+
+  // Expose minimal API for modules
+  window.qrboot = { artifacts, modules: loadedModules, log, startScanner, stopScanner, processFragment };
+
+})();
+</script>
+</body>
+</html>

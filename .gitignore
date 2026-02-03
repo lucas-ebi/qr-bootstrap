@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Generated files
+*.log
+.DS_Store
+
+# Editor
+.vscode/
+*.swp
+*~
+
+# Test outputs (optional - remove if you want to track demo frames)
+# hello_frames.txt
