@@ -31,7 +31,6 @@ Each QR code contains a JSON object:
 
 ```json
 {
-  "t": "a",
   "id": "myapp",
   "kind": "mjs",
   "n": 12,
@@ -46,7 +45,6 @@ Each QR code contains a JSON object:
 
 | Field | Description |
 |-------|-------------|
-| `t` | Type: `"a"` for artifact |
 | `id` | Artifact identifier |
 | `kind` | `mjs`, `js`, `html`, or `json` |
 | `n` | Total block count |

@@ -450,7 +450,7 @@
   function processFragment(raw) {
     let data;
     try { data = JSON.parse(raw); } catch { return; }
-    if (!data || data.t !== 'a') return;
+    if (!data) return;
 
     const { id, kind, n, bs, len, h, r, k, c } = data;
     if (!id || !kind || !n || !bs || !len || !h || r === undefined || !k || !c) return;
