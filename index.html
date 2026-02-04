@@ -30,29 +30,23 @@
       filter: saturate(0.3) brightness(0.8);
     }
     #blur-layer {
-      position: fixed;
-      inset: 0;
-      z-index: 1;
-      background: rgba(0, 0, 0, 0.7);
-      backdrop-filter: blur(16px) brightness(0.3);
-      -webkit-backdrop-filter: blur(16px) brightness(0.3);
-      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100%25' height='100%25'%3E%3Cdefs%3E%3Cmask id='m'%3E%3Crect fill='white' width='100%25' height='100%25'/%3E%3Crect fill='black' x='50%25' y='50%25' width='220' height='220' transform='translate(-110,-110)'/%3E%3C/mask%3E%3C/defs%3E%3Crect fill='black' width='100%25' height='100%25' mask='url(%23m)'/%3E%3C/svg%3E");
-      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100%25' height='100%25'%3E%3Cdefs%3E%3Cmask id='m'%3E%3Crect fill='white' width='100%25' height='100%25'/%3E%3Crect fill='black' x='50%25' y='50%25' width='220' height='220' transform='translate(-110,-110)'/%3E%3C/mask%3E%3C/defs%3E%3Crect fill='black' width='100%25' height='100%25' mask='url(%23m)'/%3E%3C/svg%3E");
-      mask-size: 100% 100%;
-      -webkit-mask-size: 100% 100%;
+      display: none;
     }
     #scan-frame {
       position: fixed;
       top: 50%;
       left: 50%;
-      transform: translate(-50%, -50%);
       width: 220px;
       height: 220px;
       z-index: 2;
       pointer-events: none;
       border: 1px solid rgba(0, 255, 0, 0.15);
       box-shadow: 0 0 30px rgba(0, 255, 0, 0.1), inset 0 0 30px rgba(0, 255, 0, 0.05);
+      opacity: 0;
+      transition: left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out, opacity 0.2s;
+      transform: translate(-50%, -50%);
     }
+    #scan-frame.visible { opacity: 1; }
     #scan-frame::before, #scan-frame::after,
     #scan-frame b::before, #scan-frame b::after {
       content: '';
@@ -434,8 +428,10 @@
   }
 
   function activateHTML(id, payload) {
-    const bin = String.fromCharCode(...payload);
-    location.href = 'data:text/html;base64,' + btoa(bin);
+    const html = new TextDecoder().decode(payload);
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    location.href = url;
   }
 
   function activateJSON(id, payload) {
@@ -496,6 +492,61 @@
     }
   }
 
+  let frameTimeout = null;
+
+  function updateFrame(barcode) {
+    // Get bounding box from barcode (in canvas coords: 640x640)
+    const box = barcode.boundingBox;
+    if (!box) return;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const videoW = video.videoWidth;
+    const videoH = video.videoHeight;
+
+    // Canvas is 640x640, video is stretched to fit
+    // First: convert canvas coords to video coords
+    const canvasToVideoX = videoW / 640;
+    const canvasToVideoY = videoH / 640;
+    
+    const videoX = box.x * canvasToVideoX;
+    const videoY = box.y * canvasToVideoY;
+    const videoBoxW = box.width * canvasToVideoX;
+    const videoBoxH = box.height * canvasToVideoY;
+
+    // Now: convert video coords to screen coords (object-fit: cover)
+    const videoAspect = videoW / videoH;
+    const viewAspect = vw / vh;
+
+    let scale, offsetX = 0, offsetY = 0;
+    if (videoAspect > viewAspect) {
+      // Video wider than viewport: height fits, width crops
+      scale = vh / videoH;
+      offsetX = (vw - videoW * scale) / 2;
+    } else {
+      // Video taller than viewport: width fits, height crops
+      scale = vw / videoW;
+      offsetY = (vh - videoH * scale) / 2;
+    }
+
+    const screenX = offsetX + (videoX + videoBoxW / 2) * scale;
+    const screenY = offsetY + (videoY + videoBoxH / 2) * scale;
+    const size = Math.max(videoBoxW, videoBoxH) * scale + 24;
+
+    // Update frame position
+    frameEl.style.left = screenX + 'px';
+    frameEl.style.top = screenY + 'px';
+    frameEl.style.width = size + 'px';
+    frameEl.style.height = size + 'px';
+    frameEl.classList.add('visible');
+
+    // Hide after timeout if no new detections
+    clearTimeout(frameTimeout);
+    frameTimeout = setTimeout(() => {
+      frameEl.classList.remove('visible');
+    }, 300);
+  }
+
   async function scanLoop() {
     if (!scanning) return;
 
@@ -505,6 +556,8 @@
         const results = await detector.detect(canvas);
 
         for (const barcode of results) {
+          updateFrame(barcode);
+
           const raw = barcode.rawValue || '';
           if (raw.startsWith('{')) {
             processFragment(raw);
