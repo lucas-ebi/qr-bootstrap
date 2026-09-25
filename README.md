@@ -142,9 +142,10 @@ Good to know:
 | `tools/build.mjs` | Assembles the deployable loader in `dist/` with `TRUSTED_KEYS` pinned (`npm run build`) |
 | `.github/workflows/deploy.yml` | Tests, builds and publishes the loader to GitHub Pages |
 | `.github/workflows/sign.yml` | Signs a payload with the key stored in GitHub and outputs a QR GIF |
-| `examples/snake.html` | Example payload (a snake game) |
+| `examples/snake.html`, `examples/tetris.html` | Example payloads: two single-file games with touch controls (about 2 and 3 KB once signed and compressed) |
 | `test/roundtrip.test.mjs` | Unit tests: `npm test` |
-| `test/e2e.mjs` | Browser test with fake camera, using the snake game as payload (optional, see its header) |
+| `test/tetris.test.mjs` | Runs the Tetris game's logic in Node with a stubbed DOM (`npm test`) |
+| `test/e2e.mjs` | Browser test with fake camera, using the games as payloads (optional, see its header) |
 | `sw.js`, `manifest.json` | Offline support and PWA metadata |
 
 ## Third-party

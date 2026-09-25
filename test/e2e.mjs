@@ -31,6 +31,7 @@ const noise = Array.from({ length: 150 }, () => '// ' + Math.random().toString(3
 const mod = (who, version) => stream(who, 'mjs', 'demo', `export function init(ctx) { window.__ran = (window.__ran || 0) + 1; window.__ctx = Object.keys(ctx).join(); }\nexport const hello = 'world';\n${noise}`, version);
 const evil = await stream(stranger, 'mjs', 'evil', 'export function init() { window.__pwned = 1 }', 1);
 const snake = await stream(signer, 'html', 'snake', await readFile(new URL('examples/snake.html', root)), 1);
+const tetris = await stream(signer, 'html', 'tetris', await readFile(new URL('examples/tetris.html', root)), 1);
 
 const img = renderFrames(snake.frames.slice(0, 30), { scale: 8 });
 const intro = renderIntro('https://lucas-ebi.github.io/qr-bootstrap/', [3, 2, 1], img.width);
@@ -53,7 +54,7 @@ const page = await (await browser.newContext({ permissions: ['camera'] })).newPa
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => m.type() === 'error' && errors.push(m.text()));
-await page.addInitScript(() => {
+const stubDetector = () => { // hands queued strings to the loader as if a camera had scanned them
   window.__queue = [];
   window.BarcodeDetector = class {
     async detect() {
@@ -61,7 +62,8 @@ await page.addInitScript(() => {
       return raw ? [{ rawValue: raw, boundingBox: { x: 100, y: 80, width: 200, height: 200 } }] : [];
     }
   };
-});
+};
+await page.addInitScript(stubDetector);
 
 let failed = 0;
 const check = (name, ok, extra = '') => { console.log(ok ? 'PASS' : 'FAIL', name, extra); failed += !ok; };
@@ -144,6 +146,17 @@ const probe = await frame.evaluate(() => {
 check('sandboxed: opaque origin, no access to the loader or its storage',
   probe.origin === 'null' && probe.parent === 'SecurityError' && probe.storage === 'SecurityError', JSON.stringify(probe));
 
+const PALETTE = ['#38bdf8', '#facc15', '#c084fc', '#4ade80', '#f87171', '#60a5fa', '#fb923c'].map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)));
+// Cells drawn in a full piece colour: locked blocks and the falling piece (the landing ghost is translucent).
+const pieceCells = f => f.evaluate(pal => {
+  const g = document.getElementById('board').getContext('2d');
+  let n = 0;
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 10; x++) {
+    const [r, gr, b] = g.getImageData(x * 30 + 15, y * 30 + 15, 1, 1).data;
+    if (pal.some(p => p[0] === r && p[1] === gr && p[2] === b)) n++;
+  }
+  return n;
+}, PALETTE);
 const snakeCells = f => f.evaluate(() => {
   const g = document.getElementById('c').getContext('2d'), out = [];
   for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
@@ -164,6 +177,57 @@ await shot('snake-sandboxed');
 await page.click('#app button');
 await page.waitForFunction(() => !document.getElementById('app') && document.querySelector('#state span').textContent.startsWith('Point at'));
 check('close button returns to scanning', true);
+
+// 8. Tetris (HTML payload) with the keyboard: drop, play to game over, restart
+await feed(shuffledWithLoss(tetris.frames));
+await until('Waiting for confirmation');
+await page.click('#ask-yes');
+await page.waitForSelector('#app iframe');
+const tf = await (await page.$('#app iframe')).contentFrame();
+await tf.waitForSelector('#board');
+check(`tetris (${tetris.n} blocks) loaded from QR frames`, /^Tetris/.test(await tf.title()), await tf.title());
+const c0 = await pieceCells(tf);
+await page.keyboard.press('ArrowLeft');
+await page.keyboard.press('ArrowUp');
+await page.keyboard.press('Space');
+await page.waitForTimeout(150);
+const c1 = await pieceCells(tf);
+check('tetris: a hard drop locks the piece and a new one appears', c0 === 4 && c1 >= 8 && /^Tetris [1-9]/.test(await tf.title()), `${c0} -> ${c1} cells, ${await tf.title()}`);
+await shot('tetris-desktop');
+let presses = 0;
+while (!(await tf.title()).includes('game over') && presses++ < 60) { await page.keyboard.press('Space'); await page.waitForTimeout(30); }
+check('tetris: stacking pieces in one column ends the game', (await tf.title()).includes('game over'), `after ${presses} drops: ${await tf.title()}`);
+await page.keyboard.press('q');
+await page.waitForTimeout(100);
+check('tetris: any key restarts', (await tf.title()) === 'Tetris 0', await tf.title());
+await page.click('#app button');
+await page.waitForFunction(() => !document.getElementById('app'));
+
+// ---- Scenario 3: Tetris on an emulated phone, with the on-screen buttons ---------------------------
+{
+  const ctx3 = await browser.newContext({ permissions: ['camera'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const page3 = await ctx3.newPage();
+  page3.on('pageerror', e => errors.push(e.message));
+  await page3.addInitScript(stubDetector);
+  await page3.goto(`http://localhost:${server.address().port}/`);
+  await page3.waitForFunction(() => document.querySelector('#state span').textContent.startsWith('Point at'));
+  await page3.evaluate(q => window.__queue.push(...q), shuffledWithLoss(tetris.frames));
+  await page3.waitForSelector('#ask:not(.hidden)', { timeout: 15000 });
+  await page3.tap('#ask-yes');
+  await page3.waitForSelector('#app iframe');
+  const mf = await (await page3.$('#app iframe')).contentFrame();
+  await mf.waitForSelector('#board');
+  const fits = await mf.evaluate(() => ['#board', '#pad', '#side'].map(sel => { const r = document.querySelector(sel).getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
+  check('tetris phone: board, side panel and buttons all fit on a 390x844 screen', fits.every(Boolean), JSON.stringify(fits));
+  check('tetris phone: on-screen buttons are shown', await mf.locator('#pad').isVisible());
+  for (const name of ['Left', 'Left', 'Rotate', 'Right']) await mf.locator(`button[aria-label="${name}"]`).tap();
+  await mf.locator('button[aria-label="Drop"]').tap();
+  await page3.waitForTimeout(150);
+  const m1 = await pieceCells(mf);
+  check('tetris phone: tapping Drop locks the piece', m1 >= 8 && /^Tetris [1-9]/.test(await mf.title()), `${m1} cells, ${await mf.title()}`);
+  await mf.locator('#board').tap(); // tapping the board rotates; must not throw
+  await page3.screenshot({ path: shots ? `${shots}/tetris-mobile.png` : undefined });
+}
 
 // ---- Scenario 2: no BarcodeDetector -> jsQR fallback, fed by the real GIF -------------------------
 {
