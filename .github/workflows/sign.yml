@@ -1,0 +1,61 @@
+name: Sign payload
+
+# Signs a payload from this repo and produces an animated-QR player page, using a private key that
+# lives only in GitHub. Run it from Actions -> Sign payload -> Run workflow, or:
+#   gh workflow run sign.yml -f file=examples/snake.html -f id=snake
+# then fetch the result with:  gh run download <run-id>
+#
+# One-time setup is in the README ("Signing in CI"). The key is an *environment* secret named
+# SIGNING_KEY in the `signing` environment, so it can be limited to `main` and to reviewers.
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'Path of the payload in this repo (for example examples/snake.html)'
+        required: true
+      id:
+        description: 'App id (letters, digits, _ . -)'
+        required: true
+      version:
+        description: 'Version number (default: current Unix time)'
+        required: false
+      block:
+        description: 'Bytes per QR block'
+        required: false
+        default: '200'
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    environment: signing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sign
+        # Inputs go through env vars, never into the script text, so they cannot inject commands.
+        run: |
+          case "$FILE" in
+            /*|*..*) echo "file must be a relative path inside the repo" >&2; exit 1 ;;
+          esac
+          [ -f "$FILE" ] || { echo "no such file: $FILE" >&2; exit 1; }
+          node tools/encode.mjs sign "$FILE" --id "$APP_ID" --block "$BLOCK" \
+            ${VERSION:+--version "$VERSION"} --html "$RUNNER_TEMP/player.html"
+        env:
+          QB_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          FILE: ${{ inputs.file }}
+          APP_ID: ${{ inputs.id }}
+          VERSION: ${{ inputs.version }}
+          BLOCK: ${{ inputs.block }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: player-${{ inputs.id }}
+          path: ${{ runner.temp }}/player.html
+          retention-days: 7
