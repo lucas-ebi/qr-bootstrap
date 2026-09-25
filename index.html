@@ -2,594 +2,233 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta name="theme-color" content="#000000">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0b0c">
+  <meta name="color-scheme" content="dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>QR Bootstrap</title>
   <style>
+    :root { --bg: #0b0b0c; --fg: #ececec; --dim: #8a8a8f; --accent: #60a5fa; --err: #f87171; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: 'SF Mono', Monaco, Consolas, monospace;
-      background: #000;
-      color: #0f0;
+      font: 14px/1.4 system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
       min-height: 100vh;
       overflow: hidden;
       user-select: none;
       -webkit-user-select: none;
     }
-    #camera-view {
-      position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      z-index: 0;
-      filter: saturate(0.3) brightness(0.8);
-    }
-    #blur-layer {
-      display: none;
-    }
-    #scan-frame {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      width: 220px;
-      height: 220px;
-      z-index: 2;
-      pointer-events: none;
-      border: 1px solid rgba(0, 255, 0, 0.15);
-      box-shadow: 0 0 30px rgba(0, 255, 0, 0.1), inset 0 0 30px rgba(0, 255, 0, 0.05);
-      opacity: 0;
-      transition: left 0.15s ease-out, top 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out, opacity 0.2s;
+    #cam { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: brightness(0.75); }
+
+    /* Tracks the QR code under the camera */
+    #frame {
+      position: fixed; top: 50%; left: 50%; width: 220px; height: 220px;
       transform: translate(-50%, -50%);
+      pointer-events: none; opacity: 0;
+      transition: left .15s ease-out, top .15s ease-out, width .15s ease-out, height .15s ease-out, opacity .2s;
     }
-    #scan-frame.visible { opacity: 1; }
-    #scan-frame::before, #scan-frame::after,
-    #scan-frame b::before, #scan-frame b::after {
-      content: '';
-      position: absolute;
-      width: 36px;
-      height: 36px;
-      border: 2px solid #0f0;
-      filter: drop-shadow(0 0 4px #0f0);
+    #frame.on { opacity: 1; }
+    #frame::before, #frame::after, #frame b::before, #frame b::after {
+      content: ''; position: absolute; width: 28px; height: 28px; border: 3px solid var(--fg); border-radius: 4px;
+      transition: border-color .15s;
     }
-    #scan-frame::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
-    #scan-frame::after { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
-    #scan-frame b { display: block; position: absolute; inset: 0; }
-    #scan-frame b::before { bottom: -1px; left: -1px; top: auto; border-right: 0; border-top: 0; }
-    #scan-frame b::after { bottom: -1px; right: -1px; top: auto; border-left: 0; border-top: 0; }
-    @keyframes scanline {
-      0%, 100% { top: 0; opacity: 1; }
-      50% { top: calc(100% - 2px); opacity: 0.5; }
-    }
-    @keyframes pulse {
-      0% { box-shadow: 0 0 30px rgba(0, 255, 0, 0.1), inset 0 0 30px rgba(0, 255, 0, 0.05); }
-      50% { box-shadow: 0 0 60px rgba(0, 255, 0, 0.6), inset 0 0 40px rgba(0, 255, 0, 0.2); }
-      100% { box-shadow: 0 0 30px rgba(0, 255, 0, 0.1), inset 0 0 30px rgba(0, 255, 0, 0.05); }
-    }
-    #scan-frame.pulse { animation: pulse 0.15s ease-out; }
-    #scan-frame i {
-      display: block;
-      position: absolute;
-      left: 10%;
-      right: 10%;
-      height: 2px;
-      background: linear-gradient(90deg, transparent, #0f0, transparent);
-      box-shadow: 0 0 8px #0f0;
-      animation: scanline 2s ease-in-out infinite;
-      opacity: 0.7;
-    }
-    #progress {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      height: 2px;
-      background: #0f0;
-      box-shadow: 0 0 10px #0f0;
-      z-index: 3;
-      transition: width 0.3s;
-      width: 0;
-    }
+    #frame.pulse::before, #frame.pulse::after, #frame.pulse b::before, #frame.pulse b::after { border-color: var(--accent); }
+    #frame::before { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+    #frame::after { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+    #frame b { position: absolute; inset: 0; }
+    #frame b::before { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+    #frame b::after { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+
     #hud {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 3;
-      font-size: 11px;
-      color: #0f0;
-      text-shadow: 0 0 8px #0f0;
-      text-align: center;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.5s;
-      letter-spacing: 2px;
+      position: fixed; left: 16px; right: 16px; bottom: max(20px, env(safe-area-inset-bottom));
+      margin: 0 auto; max-width: 420px; padding: 12px 16px;
+      background: rgba(11, 11, 12, 0.72); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
     }
-    #hud.visible { opacity: 0.8; }
-    #no-support {
-      position: fixed;
-      inset: 0;
-      background: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      font-size: 12px;
-      color: #0f04;
-      text-align: center;
-      padding: 40px;
+    #state { display: flex; justify-content: space-between; gap: 12px; }
+    #state span:last-child { color: var(--dim); font-variant-numeric: tabular-nums; }
+    #hud.err #state span:first-child { color: var(--err); }
+    #bar { height: 3px; margin-top: 10px; background: rgba(255, 255, 255, 0.12); border-radius: 2px; overflow: hidden; }
+    #bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+    #fatal {
+      position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
+      padding: 32px; background: var(--bg); color: var(--dim); text-align: center;
     }
+    #fatal strong { display: block; color: var(--fg); margin-bottom: 6px; font-size: 16px; }
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
-  <video id="camera-view" playsinline muted autoplay></video>
-  <div id="blur-layer"></div>
-  <div id="scan-frame"><b></b><i></i></div>
-  <div id="progress"></div>
-  <div id="hud"></div>
-  
-  <div id="no-support" class="hidden">Camera or BarcodeDetector unavailable</div>
+  <video id="cam" playsinline muted autoplay></video>
+  <div id="frame"><b></b></div>
+  <div id="hud" role="status" aria-live="polite">
+    <div id="state"><span>Starting…</span><span></span></div>
+    <div id="bar"><i></i></div>
+  </div>
+  <div id="fatal" class="hidden"><div><strong></strong><span></span></div></div>
 
-<script>
-(() => {
-  'use strict';
+<script type="module">
+import { Receiver, importKey } from './fountain.js';
 
-  // ========================================
-  // FEATURE DETECTION
-  // ========================================
-  const hasBarcode = 'BarcodeDetector' in window;
-  const hasCrypto = crypto && crypto.subtle;
-  const hasMedia = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+// Ed25519 public keys (base64url) allowed to sign payloads.
+// Generate a pair with: node tools/encode.mjs keygen   (see README)
+const TRUSTED_KEYS = [];
 
-  if (!hasBarcode || !hasCrypto || !hasMedia) {
-    document.getElementById('no-support').classList.remove('hidden');
-    return;
-  }
+const $ = id => document.getElementById(id);
+const video = $('cam'), frameEl = $('frame'), hud = $('hud');
+const [stateEl, countEl] = hud.querySelectorAll('#state span'), barEl = $('bar').firstElementChild;
 
-  // ========================================
-  // PWA REGISTRATION
-  // ========================================
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  }
+function show(text, { count = '', pct = 0, err = false } = {}) {
+  stateEl.textContent = text;
+  countEl.textContent = count;
+  barEl.style.width = pct + '%';
+  hud.classList.toggle('err', err);
+}
 
-  // ========================================
-  // DOM ELEMENTS
-  // ========================================
-  const video = document.getElementById('camera-view');
-  const progressEl = document.getElementById('progress');
-  const hudEl = document.getElementById('hud');
-  const frameEl = document.getElementById('scan-frame');
+function fatal(title, detail) {
+  $('fatal').querySelector('strong').textContent = title;
+  $('fatal').querySelector('span').textContent = detail;
+  $('fatal').classList.remove('hidden');
+}
 
-  // ========================================
-  // STATE
-  // ========================================
-  const artifacts = new Map();
-  const loadedModules = new Map();
-  let scanning = false;
-  let stream = null;
-  let detector = null;
-  let canvas = null;
-  let ctx = null;
+// ---- Support checks ---------------------------------------------------------
+const missing = [
+  !isSecureContext && 'a secure context (serve over HTTPS or localhost)',
+  isSecureContext && !navigator.mediaDevices?.getUserMedia && 'camera access',
+  !('BarcodeDetector' in window) && 'BarcodeDetector (use Chrome or Edge)',
+].filter(Boolean);
+if (missing.length) {
+  fatal('Unsupported browser', 'Missing: ' + missing.join(', '));
+  throw new Error('unsupported: ' + missing.join(', '));
+}
 
-  // ========================================
-  // MINIMAL UI
-  // ========================================
-  function updateProgress() {
-    let totalBlocks = 0, solvedBlocks = 0;
-    for (const dec of artifacts.values()) {
-      totalBlocks += dec.n;
-      solvedBlocks += dec.solved;
-    }
-    if (totalBlocks > 0) {
-      progressEl.style.width = (solvedBlocks / totalBlocks * 100) + '%';
-      hudEl.textContent = `${solvedBlocks}/${totalBlocks}`;
-      hudEl.classList.add('visible');
-    }
-  }
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
-  function log(msg, type = '') {
-    // Silent by default, but available to modules
-    if (type === 'error') console.error(msg);
-  }
+// ---- Payload activation -----------------------------------------------------
+const modules = new Map();
+let stream = null, scanning = false, detector = null;
 
-  function setStatus() {}
-
-  function startScanner() {
-    if (scanning) return;
-    init();
-  }
-
-  function stopScanner() {
-    scanning = false;
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop());
-      stream = null;
-    }
-    video.srcObject = null;
-  }
-
-  // ========================================
-  // PRNG (Mulberry32)
-  // ========================================
-  function mulberry32(seed) {
-    return () => {
-      seed = (seed + 0x6D2B79F5) | 0;
-      let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return (t ^ (t >>> 14)) >>> 0;
-    };
-  }
-
-  // ========================================
-  // FOUNTAIN DECODER (LT Code style)
-  // ========================================
-  class FountainDecoder {
-    constructor(id, type, n, bs, len, hash) {
-      this.id = id;
-      this.type = type;
-      this.n = n;           // block count
-      this.bs = bs;         // block size
-      this.len = len;       // original length
-      this.hash = hash;     // SHA-256 hex
-
-      this.blocks = new Array(n).fill(null);
-      this.pending = [];    // equations not yet simplified
-      this.solved = 0;
-      this.seen = new Set();
-      this.symbolCount = 0;
-      this.startTime = Date.now();
-    }
-
-    // Pick k unique block indices using seed
-    pickBlocks(seed, k) {
-      const rng = mulberry32(seed);
-      const indices = new Set();
-      while (indices.size < k) {
-        indices.add(rng() % this.n);
-      }
-      return Array.from(indices).sort((a, b) => a - b);
-    }
-
-    // XOR two Uint8Arrays
-    xor(a, b) {
-      const out = new Uint8Array(a.length);
-      for (let i = 0; i < a.length; i++) out[i] = a[i] ^ b[i];
-      return out;
-    }
-
-    // Process incoming symbol
-    addSymbol(seed, degree, data) {
-      const key = seed.toString();
-      if (this.seen.has(key)) return false;
-      this.seen.add(key);
-      this.symbolCount++;
-
-      let indices = this.pickBlocks(seed, degree);
-      let rhs = new Uint8Array(data);
-
-      // Substitute known blocks
-      indices = indices.filter(idx => {
-        if (this.blocks[idx]) {
-          rhs = this.xor(rhs, this.blocks[idx]);
-          return false;
-        }
-        return true;
-      });
-
-      // If single unknown, solve immediately
-      if (indices.length === 1) {
-        this._solve(indices[0], rhs);
-        return this.solved === this.n;
-      }
-
-      // Otherwise store as pending equation
-      if (indices.length > 1) {
-        this.pending.push({ indices, rhs });
-      }
-
-      return this.solved === this.n;
-    }
-
-    // Solve a block and propagate
-    _solve(idx, data) {
-      if (this.blocks[idx]) return;
-      this.blocks[idx] = data;
-      this.solved++;
-
-      // Propagate to pending equations
-      let changed = true;
-      while (changed) {
-        changed = false;
-        for (let i = this.pending.length - 1; i >= 0; i--) {
-          const eq = this.pending[i];
-          const pos = eq.indices.indexOf(idx);
-          if (pos !== -1) {
-            eq.rhs = this.xor(eq.rhs, data);
-            eq.indices.splice(pos, 1);
-            changed = true;
-
-            if (eq.indices.length === 1) {
-              this.pending.splice(i, 1);
-              this._solve(eq.indices[0], eq.rhs);
-            } else if (eq.indices.length === 0) {
-              this.pending.splice(i, 1);
-            }
-          }
-        }
-        // Check for newly solvable single-block equations
-        for (let i = this.pending.length - 1; i >= 0; i--) {
-          const eq = this.pending[i];
-          if (eq.indices.length === 1 && !this.blocks[eq.indices[0]]) {
-            this.pending.splice(i, 1);
-            this._solve(eq.indices[0], eq.rhs);
-            changed = true;
-          }
-        }
-      }
-    }
-
-    // Reconstruct and verify
-    async reconstruct() {
-      if (this.solved !== this.n) return null;
-
-      // Concatenate blocks
-      const full = new Uint8Array(this.n * this.bs);
-      for (let i = 0; i < this.n; i++) {
-        full.set(this.blocks[i], i * this.bs);
-      }
-
-      // Trim to original length
-      const payload = full.slice(0, this.len);
-
-      // Verify SHA-256
-      const hashBuf = await crypto.subtle.digest('SHA-256', payload);
-      const hashArr = new Uint8Array(hashBuf);
-      let hex = '';
-      for (let i = 0; i < hashArr.length; i++) {
-        hex += ('0' + hashArr[i].toString(16)).slice(-2);
-      }
-
-      if (hex !== this.hash) {
-        log(`Hash mismatch for ${this.id}`, 'error');
-        return null;
-      }
-
-      return payload;
-    }
-
-    stats() {
-      return {
-        solved: this.solved,
-        total: this.n,
-        symbols: this.symbolCount,
-        pending: this.pending.length,
-        elapsed: ((Date.now() - this.startTime) / 1000).toFixed(1)
-      };
-    }
-  }
-
-  // ========================================
-  // BASE64URL DECODE
-  // ========================================
-  function b64url(s) {
-    s = s.replace(/-/g, '+').replace(/_/g, '/');
-    while (s.length % 4) s += '=';
-    const bin = atob(s);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    return arr;
-  }
-
-  // ========================================
-  // MODULE ACTIVATION
-  // ========================================
-  async function activateArtifact(decoder) {
-    const payload = await decoder.reconstruct();
-    if (!payload) return;
-
-    if (decoder.type === 'mjs' || decoder.type === 'js') {
-      await activateModule(decoder.id, payload);
-    } else if (decoder.type === 'html') {
-      activateHTML(decoder.id, payload);
-    } else if (decoder.type === 'json') {
-      activateJSON(decoder.id, payload);
-    }
-  }
-
-  async function activateModule(id, payload) {
-    const source = new TextDecoder().decode(payload);
-    const blob = new Blob([source], { type: 'application/javascript' });
-    const url = URL.createObjectURL(blob);
-
+async function activate({ type, id, payload }) {
+  const text = () => new TextDecoder().decode(payload);
+  if (type === 'json') {
+    modules.set(id, JSON.parse(text()));
+  } else if (type === 'html') {
+    location.href = URL.createObjectURL(new Blob([text()], { type: 'text/html' }));
+  } else if (type === 'mjs') {
+    const url = URL.createObjectURL(new Blob([text()], { type: 'text/javascript' }));
     try {
       const mod = await import(url);
-      loadedModules.set(id, mod);
-
-      if (typeof mod.init === 'function') {
-        await mod.init({
-          id,
-          artifacts,
-          modules: loadedModules,
-          log,
-          startScanner,
-          stopScanner
-        });
-      }
-    } catch (e) {
-      log(`Module ${id}: ${e.message}`, 'error');
+      modules.set(id, mod);
+      if (typeof mod.init === 'function') await mod.init({ id, modules, log: console.log, startScanner, stopScanner });
     } finally {
       URL.revokeObjectURL(url);
     }
+  } else {
+    throw new Error('unknown type ' + type);
   }
+}
 
-  function activateHTML(id, payload) {
-    const html = new TextDecoder().decode(payload);
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    location.href = url;
+// ---- Receiving --------------------------------------------------------------
+let receiver;
+
+async function onScan(raw) {
+  const r = await receiver.push(raw);
+  if (!r) return;
+  frameEl.classList.remove('pulse');
+  void frameEl.offsetWidth;
+  frameEl.classList.add('pulse');
+
+  if (r.error) return show('Rejected', { count: r.error, err: true });
+  if (!r.opened) return show('Receiving', { count: `${r.rank}/${r.n}`, pct: r.rank / r.n * 100 });
+  try {
+    show('Running', { count: r.opened.id, pct: 100 });
+    await activate(r.opened);
+  } catch (e) {
+    console.error(e);
+    show('Failed to run ' + r.opened.id, { count: e.message, err: true });
   }
+}
 
-  function activateJSON(id, payload) {
-    try {
-      loadedModules.set(id, JSON.parse(new TextDecoder().decode(payload)));
-    } catch (e) {}
+// ---- Camera -----------------------------------------------------------------
+async function startScanner() {
+  if (scanning) return;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    await video.play();
+    detector ??= new BarcodeDetector({ formats: ['qr_code'] });
+    scanning = true;
+    if (!hud.classList.contains('err')) show('Point at a QR stream');
+    scanLoop();
+  } catch (e) {
+    show('Camera unavailable', { count: e.name === 'NotAllowedError' ? 'permission denied' : e.message, err: true });
   }
+}
 
-  // ========================================
-  // FRAGMENT PROCESSING
-  // ========================================
-  function processFragment(raw) {
-    let data;
-    try { data = JSON.parse(raw); } catch { return; }
-    if (!data) return;
+function stopScanner() {
+  scanning = false;
+  stream?.getTracks().forEach(t => t.stop());
+  stream = null;
+  video.srcObject = null;
+}
 
-    const { i, t, n, b, l, h, r, k, c } = data;
-    if (!i || !t || !n || !b || !l || !h || r === undefined || !k || !c) return;
+let frameTimer;
+function trackCode({ boundingBox: box }) {
+  if (!box) return;
+  // Map video pixel coords to screen coords (video is object-fit: cover)
+  const vw = innerWidth, vh = innerHeight, w = video.videoWidth, h = video.videoHeight;
+  const scale = Math.max(vw / w, vh / h);
+  const ox = (vw - w * scale) / 2, oy = (vh - h * scale) / 2;
+  const size = Math.max(box.width, box.height) * scale + 24;
+  Object.assign(frameEl.style, {
+    left: ox + (box.x + box.width / 2) * scale + 'px',
+    top: oy + (box.y + box.height / 2) * scale + 'px',
+    width: size + 'px',
+    height: size + 'px',
+  });
+  frameEl.classList.add('on');
+  clearTimeout(frameTimer);
+  frameTimer = setTimeout(() => frameEl.classList.remove('on'), 300);
+}
 
-    let decoder = artifacts.get(i);
-    if (!decoder) {
-      decoder = new FountainDecoder(i, t, n, b, l, h);
-      artifacts.set(i, decoder);
-    }
-
-    const complete = decoder.addSymbol(r, k, b64url(c));
-    updateProgress();
-    
-    // Pulse feedback
-    frameEl.classList.remove('pulse');
-    void frameEl.offsetWidth;
-    frameEl.classList.add('pulse');
-
-    if (complete) activateArtifact(decoder);
-  }
-
-  // ========================================
-  // SCANNER
-  // ========================================
-  async function init() {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-      });
-
-      video.srcObject = stream;
-      await video.play();
-
-      canvas = document.createElement('canvas');
-      canvas.width = canvas.height = 640;
-      ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-      detector = new BarcodeDetector({ formats: ['qr_code'] });
-      scanning = true;
-      scanLoop();
-    } catch (e) {
-      log('Camera: ' + e.message, 'error');
-    }
-  }
-
-  let frameTimeout = null;
-
-  function updateFrame(barcode) {
-    // Get bounding box from barcode (in canvas coords: 640x640)
-    const box = barcode.boundingBox;
-    if (!box) return;
-
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const videoW = video.videoWidth;
-    const videoH = video.videoHeight;
-
-    // Canvas is 640x640, video is stretched to fit
-    // First: convert canvas coords to video coords
-    const canvasToVideoX = videoW / 640;
-    const canvasToVideoY = videoH / 640;
-    
-    const videoX = box.x * canvasToVideoX;
-    const videoY = box.y * canvasToVideoY;
-    const videoBoxW = box.width * canvasToVideoX;
-    const videoBoxH = box.height * canvasToVideoY;
-
-    // Now: convert video coords to screen coords (object-fit: cover)
-    const videoAspect = videoW / videoH;
-    const viewAspect = vw / vh;
-
-    let scale, offsetX = 0, offsetY = 0;
-    if (videoAspect > viewAspect) {
-      // Video wider than viewport: height fits, width crops
-      scale = vh / videoH;
-      offsetX = (vw - videoW * scale) / 2;
-    } else {
-      // Video taller than viewport: width fits, height crops
-      scale = vw / videoW;
-      offsetY = (vh - videoH * scale) / 2;
-    }
-
-    const screenX = offsetX + (videoX + videoBoxW / 2) * scale;
-    const screenY = offsetY + (videoY + videoBoxH / 2) * scale;
-    const size = Math.max(videoBoxW, videoBoxH) * scale + 24;
-
-    // Update frame position
-    frameEl.style.left = screenX + 'px';
-    frameEl.style.top = screenY + 'px';
-    frameEl.style.width = size + 'px';
-    frameEl.style.height = size + 'px';
-    frameEl.classList.add('visible');
-
-    // Hide after timeout if no new detections
-    clearTimeout(frameTimeout);
-    frameTimeout = setTimeout(() => {
-      frameEl.classList.remove('visible');
-    }, 300);
-  }
-
-  async function scanLoop() {
-    if (!scanning) return;
-
-    try {
-      if (video.videoWidth > 0) {
-        ctx.drawImage(video, 0, 0, 640, 640);
-        const results = await detector.detect(canvas);
-
-        for (const barcode of results) {
-          updateFrame(barcode);
-
-          const raw = barcode.rawValue || '';
-          if (raw.startsWith('{')) {
-            processFragment(raw);
-          } else if (raw.includes('#')) {
-            const frag = raw.split('#')[1];
-            if (frag) {
-              try { processFragment(atob(frag)); } catch { processFragment(frag); }
-            }
-          }
-        }
+async function scanLoop() {
+  if (!scanning) return;
+  try {
+    if (video.videoWidth > 0) {
+      for (const code of await detector.detect(video)) {
+        trackCode(code);
+        onScan(code.rawValue || '');
       }
-    } catch (e) {}
+    }
+  } catch {}
+  requestAnimationFrame(scanLoop);
+}
 
-    requestAnimationFrame(scanLoop);
-  }
+// ---- Start ------------------------------------------------------------------
+try {
+  receiver = new Receiver(await Promise.all(TRUSTED_KEYS.map(importKey)));
+} catch (e) {
+  fatal('Unsupported browser', 'Ed25519 signature verification is not available');
+  throw e;
+}
+if (!TRUSTED_KEYS.length) show('No trusted signing key', { count: 'see README', err: true });
 
-  // ========================================
-  // AUTO-START
-  // ========================================
-  // Process hash on load (if opened via QR scan)
-  if (location.hash.length > 1) {
-    const frag = location.hash.slice(1);
-    try { processFragment(atob(frag)); } catch { processFragment(frag); }
-  }
+// A QR that opens this page as a URL can carry its first frame in the hash
+if (location.hash.length > 1) {
+  let frag = location.hash.slice(1);
+  try { frag = decodeURIComponent(frag); } catch {}
+  onScan(frag);
+}
 
-  // Auto-start camera
-  init();
-
-  // Expose minimal API for modules
-  window.qrboot = { artifacts, modules: loadedModules, log, startScanner, stopScanner, processFragment };
-
-})();
+startScanner();
+window.qrboot = { modules, startScanner, stopScanner };
 </script>
 </body>
 </html>

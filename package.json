@@ -1,0 +1,9 @@
+{
+  "name": "qr-bootstrap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "serve": "npx serve -l 8080"
+  }
+}
