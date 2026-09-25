@@ -133,7 +133,6 @@ function fatal(title, detail) {
 const missing = [
   !isSecureContext && 'a secure context (serve over HTTPS or localhost)',
   isSecureContext && !navigator.mediaDevices?.getUserMedia && 'camera access',
-  !('BarcodeDetector' in window) && 'BarcodeDetector (use Chrome or Edge)',
 ].filter(Boolean);
 if (missing.length) {
   fatal('Unsupported browser', 'Missing: ' + missing.join(', '));
@@ -168,7 +167,7 @@ function confirmRun({ id, type, version, signer }) {
 
 // ---- Payload activation -----------------------------------------------------
 const modules = new Map();
-let stream = null, scanning = false, detector = null;
+let stream = null, scanning = false, decode = null;
 
 // HTML payloads get an opaque origin (no allow-same-origin): no access to this page's
 // storage, cache or service worker, or to other sites on the same host.
@@ -239,16 +238,54 @@ async function onScan(raw) {
   }
 }
 
+// ---- QR decoding ------------------------------------------------------------
+// Use the browser's built-in detector where there is one (Chrome on Android, macOS, ChromeOS);
+// otherwise load the vendored jsQR (desktop Linux/Windows, Firefox, Safari, iOS).
+// Either way: decode(video) -> [{ rawValue, boundingBox }], with the box in video pixels.
+async function makeDecoder() {
+  if ('BarcodeDetector' in window) {
+    const detector = new BarcodeDetector({ formats: ['qr_code'] });
+    return async v => (await detector.detect(v)).map(({ rawValue, boundingBox }) => ({ rawValue, boundingBox }));
+  }
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'vendor/jsQR.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('could not load vendor/jsQR.js'));
+    document.head.append(s);
+  });
+  const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+  return async v => {
+    const k = Math.min(1, 800 / v.videoWidth), w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    if (canvas.width !== w || canvas.height !== h) [canvas.width, canvas.height] = [w, h];
+    ctx.drawImage(v, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    const code = jsQR(data, w, h, { inversionAttempts: 'dontInvert' });
+    if (!code) return [];
+    const { topLeftCorner: a, topRightCorner: b, bottomRightCorner: c, bottomLeftCorner: d } = code.location;
+    const xs = [a.x, b.x, c.x, d.x], ys = [a.y, b.y, c.y, d.y];
+    const [x0, y0] = [Math.min(...xs), Math.min(...ys)];
+    return [{
+      rawValue: code.data,
+      boundingBox: { x: x0 / k, y: y0 / k, width: (Math.max(...xs) - x0) / k, height: (Math.max(...ys) - y0) / k },
+    }];
+  };
+}
+
 // ---- Camera -----------------------------------------------------------------
 async function startScanner() {
   if (scanning) return;
+  try {
+    decode ??= await makeDecoder();
+  } catch (e) {
+    return show('QR decoder unavailable', { count: e.message, err: true });
+  }
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
     });
     video.srcObject = stream;
     await video.play();
-    detector ??= new BarcodeDetector({ formats: ['qr_code'] });
     scanning = true;
     if (!hud.classList.contains('err')) show('Point at a QR stream');
     scanLoop();
@@ -287,7 +324,7 @@ async function scanLoop() {
   if (!scanning) return;
   try {
     if (video.videoWidth > 0) {
-      for (const code of await detector.detect(video)) {
+      for (const code of await decode(video)) {
         trackCode(code);
         onScan(code.rawValue || '');
       }

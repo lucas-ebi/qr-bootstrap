@@ -19,13 +19,14 @@ Only the latest commit on `main` (the deployed loader) is supported.
 - Escapes from the HTML payload sandbox.
 - Crafted QR frames that hang the loader, exhaust memory, or otherwise cause denial of service.
 - Service worker or caching behavior that lets content persist or be replaced unexpectedly.
+- Vulnerabilities in the vendored jsQR fallback as used here (please also report them upstream).
 - Problems in the build, signing or deploy tooling and workflows (`tools/`, `.github/workflows/`), such as key leakage.
 
 ## What is out of scope (by design)
 
 - A payload signed by a trusted key doing harmful things. Trusting a signer is the model; see "Trust model" in the [README](README.md).
 - `mjs` modules having the loader's full privileges. This is documented and intentional.
-- Browsers that lack `BarcodeDetector` or Ed25519 support.
+- Browsers that lack camera access or Ed25519 support.
 
 ## If a signing key may be compromised
 
