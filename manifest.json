@@ -1,12 +1,13 @@
 {
   "name": "QR Bootstrap Loader",
   "short_name": "QR Boot",
-  "description": "Offline fountain-code QR stream decoder with ES module execution",
-  "start_url": "/",
+  "description": "Receives signed software over an animated QR stream and runs it, offline",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#000000",
-  "theme_color": "#00ff00",
+  "background_color": "#0b0b0c",
+  "theme_color": "#0b0b0c",
   "icons": [
     {
       "src": "icon-192.png",
