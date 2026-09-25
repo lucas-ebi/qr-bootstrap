@@ -1,5 +1,7 @@
 {
   "name": "qr-bootstrap",
+  "license": "MIT",
+  "repository": "github:lucas-ebi/qr-bootstrap",
   "private": true,
   "type": "module",
   "scripts": {
