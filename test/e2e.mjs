@@ -1,17 +1,18 @@
 // Browser end-to-end test (optional, not part of `npm test`):
-//   npm i --no-save playwright qrcode-generator && npx playwright install chromium && node test/e2e.mjs [screenshot-dir]
+//   npm i --no-save playwright && npx playwright install chromium && node test/e2e.mjs [screenshot-dir]
 //
 // Scenario 1: real page, real service worker, fake camera. QR *detection* is stubbed: the test
 // hands encoder output to the page as if the camera had scanned it.
 // Scenario 2: no BarcodeDetector at all, so the loader falls back to jsQR. The "camera" is a
-// canvas stream showing real QR codes (drawn with qrcode-generator), so real pixels get decoded.
+// canvas stream that plays the real GIF made by tools/gif.mjs (countdown intro included), decoded
+// by Chromium's own GIF decoder, so real pixels get decoded and the intro frames must be ignored.
 import http from 'node:http';
 import { mkdir, readFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { keygen, makeFrames, seal } from '../tools/encode.mjs';
+import { encodeGif, renderFrames, renderIntro } from '../tools/gif.mjs';
 
 const { chromium } = await import('playwright').catch(() => {
-  console.error('playwright is not installed: npm i --no-save playwright qrcode-generator && npx playwright install chromium');
+  console.error('playwright is not installed: npm i --no-save playwright && npx playwright install chromium');
   process.exit(2);
 });
 
@@ -31,9 +32,14 @@ const mod = (who, version) => stream(who, 'mjs', 'demo', `export function init(c
 const evil = await stream(stranger, 'mjs', 'evil', 'export function init() { window.__pwned = 1 }', 1);
 const snake = await stream(signer, 'html', 'snake', await readFile(new URL('examples/snake.html', root)), 1);
 
+const img = renderFrames(snake.frames.slice(0, 30), { scale: 8 });
+const intro = renderIntro('https://lucas-ebi.github.io/qr-bootstrap/', [3, 2, 1], img.width);
+const snakeGif = encodeGif({ ...img, frames: [...intro, ...img.frames] }, { delay: 17, delays: [100, 100, 100] });
+
 const MIME = { html: 'text/html', js: 'text/javascript', json: 'application/json', png: 'image/png' };
 const trusted = [signer, otherSigner].map(k => `'${k.publicKey}'`).join(', ');
 const server = http.createServer(async (req, res) => {
+  if (req.url === '/__snake.gif') return res.writeHead(200, { 'content-type': 'image/gif' }).end(snakeGif);
   const path = (req.url.split('?')[0] === '/' ? '/index.html' : req.url.split('?')[0]);
   try {
     let body = await readFile(new URL('.' + path, root));
@@ -159,11 +165,8 @@ await page.click('#app button');
 await page.waitForFunction(() => !document.getElementById('app') && document.querySelector('#state span').textContent.startsWith('Point at'));
 check('close button returns to scanning', true);
 
-// ---- Scenario 2: no BarcodeDetector -> jsQR fallback, fed by real QR images ----------------------
-let qrLib;
-try { qrLib = createRequire(import.meta.url).resolve('qrcode-generator'); }
-catch { console.log('FAIL scenario 2 needs qrcode-generator: npm i --no-save qrcode-generator'); failed++; }
-if (qrLib) {
+// ---- Scenario 2: no BarcodeDetector -> jsQR fallback, fed by the real GIF -------------------------
+{
   // Emulate a phone (touch, coarse pointer, portrait) so the on-screen controls are exercised too.
   const ctx2 = await browser.newContext({ permissions: ['camera'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const page2 = await ctx2.newPage();
@@ -182,28 +185,28 @@ if (qrLib) {
     navigator.mediaDevices.getUserMedia = async () => cam.captureStream(30);
   });
   await page2.goto(`http://localhost:${server.address().port}/`);
-  await page2.addScriptTag({ path: qrLib });
   const started = Date.now();
-  await page2.evaluate(frames => { // show the frames on the canvas, one every 100 ms, forever
+  const gifInfo = await page2.evaluate(async () => { // play the GIF's frames on the "camera", 10 per second, forever
     const cam = window.__cam, g = cam.getContext('2d');
+    const decoder = new ImageDecoder({ data: await (await fetch('/__snake.gif')).arrayBuffer(), type: 'image/gif' });
+    await decoder.tracks.ready;
+    const n = decoder.tracks.selectedTrack.frameCount, frames = [];
+    for (let i = 0; i < n; i++) frames.push(await createImageBitmap((await decoder.decode({ frameIndex: i })).image));
     let i = 0;
     const draw = () => {
-      const qr = qrcode(0, 'M');
-      qr.addData(frames[i++ % frames.length], 'Alphanumeric');
-      qr.make();
-      const m = qr.getModuleCount(), q = 4, px = Math.floor(Math.min(cam.width, cam.height) / (m + 2 * q));
-      const size = (m + 2 * q) * px, ox = (cam.width - size) / 2, oy = (cam.height - size) / 2;
-      g.fillStyle = '#fff'; g.fillRect(0, 0, cam.width, cam.height); g.fillStyle = '#000';
-      for (let r = 0; r < m; r++) for (let c = 0; c < m; c++) if (qr.isDark(r, c)) g.fillRect(ox + (c + q) * px, oy + (r + q) * px, px, px);
+      g.fillStyle = '#fff'; g.fillRect(0, 0, cam.width, cam.height);
+      g.drawImage(frames[i++ % n], (cam.width - cam.height) / 2, 0, cam.height, cam.height);
     };
     draw();
     setInterval(draw, 100);
-  }, snake.frames);
+    return { frames: n, loops: decoder.tracks.selectedTrack.animated };
+  });
+  check('fallback: Chromium decodes the standalone GIF (intro + data frames)', gifInfo.frames === 3 + 30, JSON.stringify(gifInfo));
 
   await page2.waitForSelector('#ask:not(.hidden)', { timeout: 30000 });
   const info = await page2.evaluate(() => ({ nativeDetector: 'BarcodeDetector' in window, jsQR: typeof window.jsQR }));
   check('fallback: jsQR loaded and used instead of BarcodeDetector', !info.nativeDetector && info.jsQR === 'function', JSON.stringify(info));
-  check('fallback: real QR images decoded into a signed stream, asking for confirmation', true, `(${Date.now() - started} ms from first frame)`);
+  check('fallback: frames scanned from the GIF form a signed stream, asking for confirmation', true, `(${Date.now() - started} ms from first frame)`);
   await page2.click('#ask-yes');
   await page2.waitForSelector('#app iframe');
   const game = await (await page2.$('#app iframe')).contentFrame();

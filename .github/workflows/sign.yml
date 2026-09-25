@@ -1,9 +1,14 @@
 name: Sign payload
 
-# Signs a payload from this repo and produces an animated-QR player page, using a private key that
-# lives only in GitHub. Run it from Actions -> Sign payload -> Run workflow, or:
+# Signs a payload from this repo and produces a standalone animated GIF of QR codes (plays offline
+# in any viewer and can be shared as a file), using a private key that lives only in GitHub.
+# Run it from Actions -> Sign payload -> Run workflow, or:
 #   gh workflow run sign.yml -f file=examples/snake.html -f id=snake
-# then fetch the result with:  gh run download <run-id>
+# then fetch the GIF with:  gh run download <run-id>
+#
+# Each loop of the GIF starts with a countdown of QR codes that point at the loader, so a phone's
+# camera app can open it first. The URL defaults to this repo's GitHub Pages address; set the
+# LOADER_URL repository variable to override it (for example for a custom domain).
 #
 # One-time setup is in the README ("Signing in CI"). The key is an *environment* secret named
 # SIGNING_KEY in the `signing` environment, so it can be limited to `main` and to reviewers.
@@ -24,6 +29,10 @@ on:
         description: 'Bytes per QR block'
         required: false
         default: '200'
+      intro:
+        description: 'Seconds of countdown to the loader URL at the start of each loop (0 to disable, max 9)'
+        required: false
+        default: '5'
 
 permissions:
   contents: read
@@ -47,15 +56,18 @@ jobs:
           esac
           [ -f "$FILE" ] || { echo "no such file: $FILE" >&2; exit 1; }
           node tools/encode.mjs sign "$FILE" --id "$APP_ID" --block "$BLOCK" \
-            ${VERSION:+--version "$VERSION"} --html "$RUNNER_TEMP/player.html"
+            ${VERSION:+--version "$VERSION"} --url "$LOADER_URL" --intro "$INTRO" \
+            --gif "$RUNNER_TEMP/$APP_ID.gif"
         env:
           QB_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           FILE: ${{ inputs.file }}
           APP_ID: ${{ inputs.id }}
           VERSION: ${{ inputs.version }}
           BLOCK: ${{ inputs.block }}
+          INTRO: ${{ inputs.intro }}
+          LOADER_URL: ${{ vars.LOADER_URL || format('https://{0}.github.io/{1}/', github.repository_owner, github.event.repository.name) }}
       - uses: actions/upload-artifact@v4
         with:
-          name: player-${{ inputs.id }}
-          path: ${{ runner.temp }}/player.html
-          retention-days: 7
+          name: qr-${{ inputs.id }}
+          path: ${{ runner.temp }}/${{ inputs.id }}.gif
+          retention-days: 14

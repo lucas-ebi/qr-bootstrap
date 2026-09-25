@@ -3,7 +3,8 @@
 //
 //   node tools/encode.mjs keygen [signing-key.json | -]
 //   node tools/encode.mjs sign <file> --id <name> [--type mjs|html|json] [--version N]
-//                              [--key signing-key.json] [--block 200] [--frames N] [--html player.html]
+//                              [--key signing-key.json] [--block 200] [--frames N]
+//                              [--gif out.gif [--scale 8] [--fps 6] [--ecc M] [--url <loader URL> [--intro 5]]]
 //
 // `keygen -` prints the private key to stdout instead of a file (so it can be piped straight into
 // `gh secret set`) and the public key to stderr.
@@ -11,10 +12,14 @@
 // CI), else ./signing-key.json.
 // --version defaults to the current Unix time, so later builds are always newer.
 //
-// `sign` prints one frame per line, or writes a self-contained animated-QR player with --html.
+// `sign` prints one frame per line, or with --gif writes a standalone animated GIF of QR codes: it
+// plays offline in any viewer or browser and can be shared as a file. With --url, each loop starts
+// with --intro seconds (default 5, max 9) of countdown frames: QR codes of that URL with a counter
+// in the middle, so a phone's camera app can open the loader before the data frames begin.
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
+import { encodeGif, renderFrames, renderIntro } from './gif.mjs';
 import { DOMAIN, MAX_B, MAX_LEN, MAX_N, concat as cat, frame, mask, xor } from '../fountain.js';
 
 const TYPES = ['mjs', 'html', 'json'];
@@ -64,31 +69,6 @@ export function makeFrames(container, { block = 200, count } = {}) {
   return { id, n, b, len, frames: out };
 }
 
-const PLAYER = frames => `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>QB1 player</title>
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;font:14px system-ui,sans-serif;color:#555}
-canvas{width:min(90vw,90vh - 40px);height:auto;image-rendering:pixelated}p{margin:0;text-align:center}</style></head>
-<body><div><canvas id="c"></canvas><p id="s"></p></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
-<script>
-const frames = ${JSON.stringify(frames)};
-const fps = +new URLSearchParams(location.search).get('fps') || 6;
-const c = document.getElementById('c'), s = document.getElementById('s');
-let i = 0;
-function show() {
-  const qr = qrcode(0, 'M'); qr.addData(frames[i], 'Alphanumeric'); qr.make();
-  const m = qr.getModuleCount(), q = 4, px = 8, ctx = c.getContext('2d');
-  c.width = c.height = (m + 2 * q) * px;
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.fillStyle = '#000';
-  for (let r = 0; r < m; r++) for (let k = 0; k < m; k++) if (qr.isDark(r, k)) ctx.fillRect((k + q) * px, (r + q) * px, px, px);
-  s.textContent = (i + 1) + ' / ' + frames.length + '  (?fps=N to change speed)';
-  i = (i + 1) % frames.length;
-}
-show(); setInterval(show, 1000 / fps);
-</script></body></html>
-`;
-
 async function main([cmd, ...argv]) {
   const opt = {}, pos = [];
   for (let i = 0; i < argv.length; i++) argv[i].startsWith('--') ? opt[argv[i].slice(2)] = argv[++i] : pos.push(argv[i]);
@@ -109,12 +89,25 @@ async function main([cmd, ...argv]) {
     const container = await seal(jwk, { type, id: opt.id, payload: await readFile(pos[0]), version: opt.version === undefined ? undefined : +opt.version });
     const { id, n, b, len, frames } = makeFrames(container, { block: +opt.block || 200, count: +opt.frames || undefined });
     console.error(`stream ${id}: ${len} B signed+compressed, ${n} blocks x ${b} B, ${frames.length} frames`);
-    if (opt.html) await writeFile(opt.html, PLAYER(frames));
-    else console.log(frames.join('\n'));
+    if (opt.gif) {
+      if (opt.intro !== undefined && !opt.url) throw new Error('--intro needs --url <loader URL>');
+      if (opt.intro !== undefined && !/^[0-9]$/.test(opt.intro)) throw new Error('--intro must be a whole number of seconds from 0 to 9');
+      if (opt.url && !/^https?:\/\/\S+$/.test(opt.url)) throw new Error('--url must be an http(s) URL');
+      const img = renderFrames(frames, { scale: +opt.scale || 8, ecc: opt.ecc ?? 'M' });
+      const secs = opt.url ? (opt.intro === undefined ? 5 : +opt.intro) : 0;
+      const intro = secs ? renderIntro(opt.url, Array.from({ length: secs }, (_, i) => secs - i), img.width) : [];
+      const delay = Math.round(100 / (+opt.fps || 6));
+      const gif = encodeGif({ ...img, frames: [...intro, ...img.frames] }, { delay, delays: intro.map(() => 100) });
+      await writeFile(opt.gif, gif);
+      console.error(`${opt.gif}: ${img.width}x${img.height} px, QR version ${img.version}, ${frames.length} data frames` +
+        (secs ? ` after a ${secs} s countdown to ${opt.url}` : '') + `, ${(gif.length / 1024).toFixed(0)} KiB`);
+    } else console.log(frames.join('\n'));
   } else {
-    console.error('usage: encode.mjs keygen [file | -] | sign <file> --id <name> [--type t] [--version N] [--key f] [--block B] [--frames N] [--html out.html]');
+    console.error('usage: encode.mjs keygen [file | -] | sign <file> --id <name> [--type t] [--version N] [--key f] [--block B] [--frames N] [--gif out.gif] [--scale S] [--fps F] [--ecc L|M|Q|H] [--url U] [--intro SECS]');
     process.exit(1);
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main(process.argv.slice(2)).catch(e => { console.error('error: ' + e.message); process.exit(1); });
+}

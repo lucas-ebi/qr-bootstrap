@@ -17,13 +17,18 @@ node tools/encode.mjs keygen
 # 2. Build the loader with your public key pinned, and serve it (camera access needs localhost or HTTPS)
 TRUSTED_KEYS="<the printed public key>" npm run build && npx serve dist
 
-# 3. Turn the example game into an animated QR player, and open it on another screen
-node tools/encode.mjs sign examples/snake.html --id snake --html snake.player.html
+# 3. Turn the example game into a standalone animated GIF of QR codes
+node tools/encode.mjs sign examples/snake.html --id snake --gif snake.gif \
+  --url https://<you>.github.io/<repo>/
 ```
 
-Point the loader's camera at the player. The HUD shows progress, then the game starts. On a phone, host the loader on any static HTTPS site (a phone cannot reach your `localhost`).
+Show `snake.gif` on any screen (any image viewer or browser plays it, offline) and point the loader's camera at it. The HUD shows progress, then the game starts. On a phone, host the loader on any static HTTPS site (a phone cannot reach your `localhost`).
 
-`sign` without `--html` prints one frame per line, so you can feed any other QR renderer. To ship an update, sign the new build again (the version defaults to the current time, or pass `--version N`). The first run of each app asks for your approval.
+**The GIF is a standalone file.** It needs no player, network or browser, so it can be shared like any image. Each loop starts with a 5-second countdown (`--intro`, 0 to 9): QR codes that point at the loader `--url`, with a film-leader style counter in the middle. Scan one with the phone's normal camera app to open the loader, then point the loader at the data frames that follow. Without `--url` there is no countdown. Other options: `--scale` (pixels per QR module, default 8), `--fps` (data frames per second, default 6) and `--ecc` (L, M, Q or H).
+
+Sharing tips: send the GIF as a file or attachment. Messaging apps that "optimize" GIFs (they often convert them to video and blur them) can make the codes unreadable. The receiver only needs about as many frames as the payload has blocks (plus one or two), in any order, so missing part of a loop is fine; keep the camera pointed at it across loops.
+
+`sign` without `--gif` prints one frame per line, so you can feed any other QR renderer. To ship an update, sign the new build again (the version defaults to the current time, or pass `--version N`). The first run of each app asks for your approval.
 
 ## How it works
 
@@ -48,7 +53,7 @@ QB1/<streamId>/<n>/<len>/<seed>/<data>
 | `seed` | Symbol seed (uint32) |
 | `data` | One symbol (`b` bytes), base45 (RFC 9285) |
 
-Every character is in the QR alphanumeric set, so encoders should use alphanumeric mode (`tools/encode.mjs --html` does). Frames are self-describing; the loader may also receive one via the page URL hash (`https://host/#QB1/...`).
+Every character is in the QR alphanumeric set, so encoders should use alphanumeric mode (`tools/encode.mjs --gif` does). Frames are self-describing; the loader may also receive one via the page URL hash (`https://host/#QB1/...`).
 
 ### Payload types
 
@@ -110,7 +115,7 @@ To sign: **Actions → Sign payload → Run workflow**, giving the payload's pat
 
 ```bash
 gh workflow run sign.yml -f file=examples/snake.html -f id=snake
-gh run watch && gh run download        # fetches player-snake/player.html
+gh run watch && gh run download        # fetches qr-snake/snake.gif
 ```
 
 Good to know:
@@ -131,10 +136,12 @@ Good to know:
 | `index.html` | Loader UI: camera, scanner, HUD, payload activation |
 | `vendor/` | jsQR (Apache-2.0), the fallback QR decoder for browsers without `BarcodeDetector` |
 | `fountain.js` | Protocol core (base45, frames, decoder, container, receiver). No DOM, shared with the tools and tests |
-| `tools/encode.mjs` | `keygen` and `sign`: signs a file and emits frames or a QR player page |
+| `tools/encode.mjs` | `keygen` and `sign`: signs a file and emits frames or a standalone QR GIF |
+| `tools/gif.mjs` | QR frames to an animated GIF, with the countdown intro (dependency-free GIF encoder) |
+| `tools/vendor/` | qrcode-generator (MIT), used only by the tools to draw QR codes |
 | `tools/build.mjs` | Assembles the deployable loader in `dist/` with `TRUSTED_KEYS` pinned (`npm run build`) |
 | `.github/workflows/deploy.yml` | Tests, builds and publishes the loader to GitHub Pages |
-| `.github/workflows/sign.yml` | Signs a payload with the key stored in GitHub and outputs a QR player |
+| `.github/workflows/sign.yml` | Signs a payload with the key stored in GitHub and outputs a QR GIF |
 | `examples/snake.html` | Example payload (a snake game) |
 | `test/roundtrip.test.mjs` | Unit tests: `npm test` |
 | `test/e2e.mjs` | Browser test with fake camera, using the snake game as payload (optional, see its header) |
@@ -142,7 +149,7 @@ Good to know:
 
 ## Third-party
 
-The loader bundles one third-party file, `vendor/jsQR.js` ([jsQR](https://github.com/cozmo/jsQR) 1.4.0, Apache-2.0, license in `vendor/jsQR.LICENSE`, provenance in [vendor/README.md](vendor/README.md)). It is loaded only when the browser has no built-in `BarcodeDetector`. There are no other runtime dependencies. The optional QR player page generated by `encode.mjs --html` loads [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) (MIT) from cdnjs when you open it.
+The loader bundles one third-party file, `vendor/jsQR.js` ([jsQR](https://github.com/cozmo/jsQR) 1.4.0, Apache-2.0, license in `vendor/jsQR.LICENSE`, provenance in [vendor/README.md](vendor/README.md)). It is loaded only when the browser has no built-in `BarcodeDetector`. There are no other runtime dependencies. The command-line tools (not the deployed loader) vendor [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) 2.0.4 (MIT, in `tools/vendor/`, with its license and provenance) to draw the QR codes; the GIF encoder is our own.
 
 The app icons (`icon-192.png`, `icon-512.png`) were generated with an AI image tool. Such images may not be eligible for copyright, so the MIT license applies to them only to the extent that they are; feel free to replace them.
 

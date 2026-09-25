@@ -16,5 +16,5 @@ node_modules/
 # Signing keys (never commit)
 signing-key.json
 *.key.json
-*.player.html
+/*.gif
 dist/
