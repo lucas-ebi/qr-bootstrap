@@ -12,3 +12,8 @@ node_modules/
 
 # Test outputs (optional - remove if you want to track demo frames)
 # hello_frames.txt
+
+# Signing keys (never commit)
+signing-key.json
+*.key.json
+*.player.html

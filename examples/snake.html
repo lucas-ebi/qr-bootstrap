@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Snake</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b0c; overflow: hidden; touch-action: none; }
+  canvas { display: block; margin: 0 auto; width: min(100vw, 100vh); height: min(100vw, 100vh); }
+</style>
+<canvas id="c" width="400" height="400"></canvas>
+<script>
+// Snake in one file. Steer with arrows/WASD or swipe; tap or press any key after game over.
+const N = 20, S = 20, g = document.getElementById('c').getContext('2d');
+let snake, dir, next, food, score, dead;
+
+function place() {
+  do food = { x: Math.random() * N | 0, y: Math.random() * N | 0 };
+  while (snake.some(p => p.x === food.x && p.y === food.y));
+}
+
+function reset() {
+  snake = [{ x: 10, y: 10 }];
+  dir = next = { x: 1, y: 0 };
+  score = 0;
+  dead = false;
+  place();
+}
+
+function steer(x, y) {
+  if (dead) return reset();
+  if (x !== -dir.x || y !== -dir.y) next = { x, y };
+}
+
+function tick() {
+  if (!dead) {
+    dir = next;
+    const h = { x: (snake[0].x + dir.x + N) % N, y: (snake[0].y + dir.y + N) % N };
+    if (snake.some(p => p.x === h.x && p.y === h.y)) dead = true;
+    else {
+      snake.unshift(h);
+      if (h.x === food.x && h.y === food.y) { score++; place(); } else snake.pop();
+    }
+  }
+  draw();
+}
+
+function draw() {
+  g.fillStyle = '#0b0b0c';
+  g.fillRect(0, 0, N * S, N * S);
+  g.fillStyle = '#f87171';
+  g.fillRect(food.x * S + 2, food.y * S + 2, S - 4, S - 4);
+  g.fillStyle = dead ? '#8a8a8f' : '#60a5fa';
+  for (const p of snake) g.fillRect(p.x * S + 1, p.y * S + 1, S - 2, S - 2);
+  document.title = 'Snake ' + score + (dead ? ' (game over)' : '');
+}
+
+const KEYS = { ArrowUp: [0, -1], w: [0, -1], ArrowDown: [0, 1], s: [0, 1], ArrowLeft: [-1, 0], a: [-1, 0], ArrowRight: [1, 0], d: [1, 0] };
+addEventListener('keydown', e => KEYS[e.key] ? steer(...KEYS[e.key]) : dead && reset());
+
+let t0;
+addEventListener('touchstart', e => { t0 = e.touches[0]; });
+addEventListener('touchend', e => {
+  const t = e.changedTouches[0], dx = t.clientX - t0.clientX, dy = t.clientY - t0.clientY;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return dead && reset();
+  Math.abs(dx) > Math.abs(dy) ? steer(Math.sign(dx), 0) : steer(0, Math.sign(dy));
+});
+
+reset();
+setInterval(tick, 120);
+</script>
