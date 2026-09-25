@@ -138,7 +138,7 @@ const probe = await frame.evaluate(() => {
 check('sandboxed: opaque origin, no access to the loader or its storage',
   probe.origin === 'null' && probe.parent === 'SecurityError' && probe.storage === 'SecurityError', JSON.stringify(probe));
 
-const cells = () => frame.evaluate(() => {
+const snakeCells = f => f.evaluate(() => {
   const g = document.getElementById('c').getContext('2d'), out = [];
   for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
     const [r, gr, b] = g.getImageData(x * 20 + 10, y * 20 + 10, 1, 1).data;
@@ -146,6 +146,7 @@ const cells = () => frame.evaluate(() => {
   }
   return out;
 });
+const cells = () => snakeCells(frame);
 await page.keyboard.press('ArrowDown');
 await page.waitForTimeout(250);
 const a = await cells();
@@ -163,7 +164,9 @@ let qrLib;
 try { qrLib = createRequire(import.meta.url).resolve('qrcode-generator'); }
 catch { console.log('FAIL scenario 2 needs qrcode-generator: npm i --no-save qrcode-generator'); failed++; }
 if (qrLib) {
-  const page2 = await (await browser.newContext({ permissions: ['camera'] })).newPage();
+  // Emulate a phone (touch, coarse pointer, portrait) so the on-screen controls are exercised too.
+  const ctx2 = await browser.newContext({ permissions: ['camera'], viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const page2 = await ctx2.newPage();
   page2.on('pageerror', e => errors.push(e.message));
   await page2.addInitScript(() => {
     delete window.BarcodeDetector; // as on desktop Linux/Windows Chrome, Firefox and Safari
@@ -206,7 +209,28 @@ if (qrLib) {
   const game = await (await page2.$('#app iframe')).contentFrame();
   await game.waitForSelector('canvas');
   check('fallback: the snake game runs after being received through jsQR', /^Snake/.test(await game.title()), await game.title());
-  await page2.screenshot({ path: shots ? `${shots}/fallback.png` : undefined });
+
+  // Touch controls, on the emulated phone
+  check('touch: on-screen D-pad is shown on a touch device', await game.locator('#pad').isVisible());
+  await game.locator('button[aria-label="Down"]').tap();
+  await page2.waitForTimeout(250);
+  const d1 = await snakeCells(game);
+  await page2.waitForTimeout(250);
+  const d2 = await snakeCells(game);
+  check('touch: tapping a D-pad button steers the snake', d1.length > 0 && new Set(d2.map(c => c[0])).size === 1 && JSON.stringify(d1) !== JSON.stringify(d2), `${JSON.stringify(d1)} -> ${JSON.stringify(d2)}`);
+
+  const cdp = await ctx2.newCDPSession(page2);
+  const touchAt = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 0 }] });
+  await touchAt('touchStart', 100, 300);
+  await touchAt('touchMove', 200, 300);
+  await touchAt('touchMove', 300, 300);
+  await touchAt('touchEnd');
+  await page2.waitForTimeout(300);
+  const r1 = await snakeCells(game);
+  await page2.waitForTimeout(250);
+  const r2 = await snakeCells(game);
+  check('touch: a swipe right steers the snake', r1.length > 0 && new Set(r2.map(c => c[1])).size === 1 && JSON.stringify(r1) !== JSON.stringify(r2), `${JSON.stringify(r1)} -> ${JSON.stringify(r2)}`);
+  await page2.screenshot({ path: shots ? `${shots}/snake-mobile.png` : undefined });
 }
 
 await browser.close();
