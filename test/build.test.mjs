@@ -18,7 +18,8 @@ test('build pins the given keys and ships only the loader files', async () => {
   assert.ok(html.includes(`const TRUSTED_KEYS = ['${a}', '${b}'];`));
   assert.ok(!html.includes('const TRUSTED_KEYS = [];'));
   assert.deepEqual((await readdir(out)).sort(),
-    ['fountain.js', 'icon-192.png', 'icon-512.png', 'index.html', 'manifest.json', 'sw.js']);
+    ['fountain.js', 'icon-192.png', 'icon-512.png', 'index.html', 'manifest.json', 'sw.js', 'vendor']);
+  assert.deepEqual((await readdir(join(out, 'vendor'))).sort(), ['jsQR.LICENSE', 'jsQR.js']);
 });
 
 test('build refuses missing or malformed keys', async () => {

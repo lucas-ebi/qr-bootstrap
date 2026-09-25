@@ -10,7 +10,10 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const FILES = ['index.html', 'fountain.js', 'sw.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
+const FILES = [
+  'index.html', 'fountain.js', 'sw.js', 'manifest.json', 'icon-192.png', 'icon-512.png',
+  'vendor/jsQR.js', 'vendor/jsQR.LICENSE', // fallback QR decoder and its license
+];
 const PLACEHOLDER = 'const TRUSTED_KEYS = [];';
 const KEY = /^[A-Za-z0-9_-]{43}$/; // 32 raw bytes, base64url
 
@@ -23,7 +26,10 @@ export async function build({ out, keys }) {
   if (dest === resolve(root) || resolve(root).startsWith(dest + sep)) throw new Error('refusing to build into the source tree');
 
   await mkdir(dest, { recursive: true });
-  for (const f of FILES) await copyFile(join(root, f), join(dest, f));
+  for (const f of FILES) {
+    await mkdir(dirname(join(dest, f)), { recursive: true });
+    await copyFile(join(root, f), join(dest, f));
+  }
 
   const page = join(dest, 'index.html'), html = await readFile(page, 'utf8');
   if (!html.includes(PLACEHOLDER)) throw new Error(`index.html no longer contains "${PLACEHOLDER}"`);

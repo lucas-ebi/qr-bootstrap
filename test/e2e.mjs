@@ -1,14 +1,17 @@
 // Browser end-to-end test (optional, not part of `npm test`):
-//   npm i --no-save playwright && npx playwright install chromium && node test/e2e.mjs [screenshot-dir]
+//   npm i --no-save playwright qrcode-generator && npx playwright install chromium && node test/e2e.mjs [screenshot-dir]
 //
-// Real page, real service worker, real fake camera. Only QR *detection* is stubbed: the test
+// Scenario 1: real page, real service worker, fake camera. QR *detection* is stubbed: the test
 // hands encoder output to the page as if the camera had scanned it.
+// Scenario 2: no BarcodeDetector at all, so the loader falls back to jsQR. The "camera" is a
+// canvas stream showing real QR codes (drawn with qrcode-generator), so real pixels get decoded.
 import http from 'node:http';
 import { mkdir, readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { keygen, makeFrames, seal } from '../tools/encode.mjs';
 
 const { chromium } = await import('playwright').catch(() => {
-  console.error('playwright is not installed: npm i --no-save playwright && npx playwright install chromium');
+  console.error('playwright is not installed: npm i --no-save playwright qrcode-generator && npx playwright install chromium');
   process.exit(2);
 });
 
@@ -154,6 +157,57 @@ await shot('snake-sandboxed');
 await page.click('#app button');
 await page.waitForFunction(() => !document.getElementById('app') && document.querySelector('#state span').textContent.startsWith('Point at'));
 check('close button returns to scanning', true);
+
+// ---- Scenario 2: no BarcodeDetector -> jsQR fallback, fed by real QR images ----------------------
+let qrLib;
+try { qrLib = createRequire(import.meta.url).resolve('qrcode-generator'); }
+catch { console.log('FAIL scenario 2 needs qrcode-generator: npm i --no-save qrcode-generator'); failed++; }
+if (qrLib) {
+  const page2 = await (await browser.newContext({ permissions: ['camera'] })).newPage();
+  page2.on('pageerror', e => errors.push(e.message));
+  await page2.addInitScript(() => {
+    delete window.BarcodeDetector; // as on desktop Linux/Windows Chrome, Firefox and Safari
+    const cam = document.createElement('canvas');
+    cam.width = 640; cam.height = 480;
+    const g = cam.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cam.width, cam.height);
+    // A canvas stream only emits frames when the canvas changes, and a <video> still waiting for
+    // its first frame holds up "load". Toggle a corner pixel (inside the QR's white quiet zone).
+    let t = 0;
+    setInterval(() => { g.fillStyle = ++t % 2 ? '#fefefe' : '#fff'; g.fillRect(0, 0, 1, 1); }, 40);
+    window.__cam = cam;
+    navigator.mediaDevices.getUserMedia = async () => cam.captureStream(30);
+  });
+  await page2.goto(`http://localhost:${server.address().port}/`);
+  await page2.addScriptTag({ path: qrLib });
+  const started = Date.now();
+  await page2.evaluate(frames => { // show the frames on the canvas, one every 100 ms, forever
+    const cam = window.__cam, g = cam.getContext('2d');
+    let i = 0;
+    const draw = () => {
+      const qr = qrcode(0, 'M');
+      qr.addData(frames[i++ % frames.length], 'Alphanumeric');
+      qr.make();
+      const m = qr.getModuleCount(), q = 4, px = Math.floor(Math.min(cam.width, cam.height) / (m + 2 * q));
+      const size = (m + 2 * q) * px, ox = (cam.width - size) / 2, oy = (cam.height - size) / 2;
+      g.fillStyle = '#fff'; g.fillRect(0, 0, cam.width, cam.height); g.fillStyle = '#000';
+      for (let r = 0; r < m; r++) for (let c = 0; c < m; c++) if (qr.isDark(r, c)) g.fillRect(ox + (c + q) * px, oy + (r + q) * px, px, px);
+    };
+    draw();
+    setInterval(draw, 100);
+  }, snake.frames);
+
+  await page2.waitForSelector('#ask:not(.hidden)', { timeout: 30000 });
+  const info = await page2.evaluate(() => ({ nativeDetector: 'BarcodeDetector' in window, jsQR: typeof window.jsQR }));
+  check('fallback: jsQR loaded and used instead of BarcodeDetector', !info.nativeDetector && info.jsQR === 'function', JSON.stringify(info));
+  check('fallback: real QR images decoded into a signed stream, asking for confirmation', true, `(${Date.now() - started} ms from first frame)`);
+  await page2.click('#ask-yes');
+  await page2.waitForSelector('#app iframe');
+  const game = await (await page2.$('#app iframe')).contentFrame();
+  await game.waitForSelector('canvas');
+  check('fallback: the snake game runs after being received through jsQR', /^Snake/.test(await game.title()), await game.title());
+  await page2.screenshot({ path: shots ? `${shots}/fallback.png` : undefined });
+}
 
 await browser.close();
 server.close();
