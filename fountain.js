@@ -132,7 +132,18 @@ export class Decoder {
   }
 }
 
-// ---- Container: Ed25519 signature (64 B) || deflate-raw("<type> <id>\n" + payload)
+// ---- Container: Ed25519 signature (64 B) || deflate-raw("<type> <id> <version>\n" + payload)
+// The signature covers DOMAIN || (the compressed part), so this key's signatures cannot be
+// replayed in another protocol. `version` lets the loader refuse older payloads.
+
+export const DOMAIN = new TextEncoder().encode('QB1-payload\0');
+
+export const concat = (a, b) => {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a);
+  out.set(b, a.length);
+  return out;
+};
 
 async function pipe(bytes, transform) {
   return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(transform)).arrayBuffer());
@@ -140,7 +151,10 @@ async function pipe(bytes, transform) {
 
 export const inflate = bytes => pipe(bytes, new DecompressionStream('deflate-raw'));
 
-export const importKey = b64 => crypto.subtle.importKey('raw', b64url(b64), 'Ed25519', false, ['verify']);
+// A trusted key plus a short fingerprint (its first 8 base64url chars) to show people.
+export async function loadKey(b64) {
+  return { fp: b64.slice(0, 8), key: await crypto.subtle.importKey('raw', b64url(b64), 'Ed25519', false, ['verify']) };
+}
 
 export async function streamId(container) {
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', container));
@@ -148,25 +162,35 @@ export async function streamId(container) {
 }
 
 // Verifies the signature against any trusted key, then decompresses. Throws on failure.
+// Returns { type, id, version, payload, signer } where signer is the verifying key's fingerprint.
 export async function open(container, keys) {
-  const sig = container.subarray(0, 64), body = container.subarray(64);
-  let ok = false;
-  for (const k of keys) if (await crypto.subtle.verify('Ed25519', k, sig, body)) { ok = true; break; }
-  if (!ok) throw new Error(keys.length ? 'bad signature' : 'no trusted key');
+  const sig = container.subarray(0, 64), body = container.subarray(64), signed = concat(DOMAIN, body);
+  let signer;
+  for (const k of keys) if (await crypto.subtle.verify('Ed25519', k.key, sig, signed)) { signer = k.fp; break; }
+  if (!signer) throw new Error(keys.length ? 'bad signature' : 'no trusted key');
   const raw = await inflate(body), nl = raw.indexOf(10);
-  const [type, id] = nl < 0 ? [] : new TextDecoder().decode(raw.subarray(0, nl)).split(' ');
-  if (!type || !id) throw new Error('malformed container');
-  return { type, id, payload: raw.subarray(nl + 1) };
+  const [type, id, v] = nl < 0 ? [] : new TextDecoder().decode(raw.subarray(0, nl)).split(' ');
+  const version = /^\d{1,15}$/.test(v) ? +v : NaN;
+  if (!type || !id || isNaN(version)) throw new Error('malformed container');
+  return { type, id, version, payload: raw.subarray(nl + 1), signer };
 }
 
 // ---- Receiver: many interleaved streams, each completed and opened exactly once
 
 export class Receiver {
-  constructor(keys, maxStreams = 8) {
+  // keys: [{ fp, key }] from loadKey. accept(opened): optional async policy check that may
+  // throw to refuse a verified payload (for example, one older than what already ran).
+  constructor(keys, { accept, maxStreams = 8 } = {}) {
     this.keys = keys;
+    this.accept = accept;
     this.maxStreams = maxStreams;
     this.streams = new Map(); // streamId -> Decoder
     this.closed = new Map();  // streamId -> ignore-until (ms); Infinity once opened
+  }
+
+  // Ignore a stream for a while (for example after the user declined to run it).
+  hold(id, ms) {
+    this.closed.set(id, Date.now() + ms);
   }
 
   // Feed one scanned string. Returns null (ignored), {id, rank, n} (progress),
@@ -190,7 +214,9 @@ export class Receiver {
     try {
       const container = d.solve();
       if (await streamId(container) !== f.id) throw new Error('corrupt stream');
-      return { ...progress, rank: d.n, opened: await open(container, this.keys) };
+      const opened = await open(container, this.keys);
+      await this.accept?.(opened);
+      return { ...progress, rank: d.n, opened };
     } catch (e) {
       this.closed.set(f.id, Date.now() + 5000); // allow a retry shortly
       return { ...progress, rank: d.n, error: e.message };

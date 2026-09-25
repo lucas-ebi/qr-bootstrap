@@ -1,15 +1,21 @@
 #!/usr/bin/env node
 // Signs a payload and turns it into an endless-ish stream of QB1 frames.
 //
-//   node tools/encode.mjs keygen [signing-key.json]
-//   node tools/encode.mjs sign <file> --id <name> [--type mjs|html|json] [--key signing-key.json]
-//                              [--block 200] [--frames N] [--html player.html]
+//   node tools/encode.mjs keygen [signing-key.json | -]
+//   node tools/encode.mjs sign <file> --id <name> [--type mjs|html|json] [--version N]
+//                              [--key signing-key.json] [--block 200] [--frames N] [--html player.html]
+//
+// `keygen -` prints the private key to stdout instead of a file (so it can be piped straight into
+// `gh secret set`) and the public key to stderr.
+// `sign` reads the private key from --key, else the QB_SIGNING_KEY environment variable (used by
+// CI), else ./signing-key.json.
+// --version defaults to the current Unix time, so later builds are always newer.
 //
 // `sign` prints one frame per line, or writes a self-contained animated-QR player with --html.
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { MAX_B, MAX_LEN, MAX_N, frame, mask, xor } from '../fountain.js';
+import { DOMAIN, MAX_B, MAX_LEN, MAX_N, concat as cat, frame, mask, xor } from '../fountain.js';
 
 const TYPES = ['mjs', 'html', 'json'];
 const b64u = bytes => Buffer.from(bytes).toString('base64url');
@@ -27,13 +33,15 @@ export async function keygen() {
   return { jwk, publicKey: jwk.x };
 }
 
-// container = signature (64 B) || deflate-raw("<type> <id>\n" + payload), signed over the compressed part
-export async function seal(jwk, { type, id, payload }) {
+// container = signature (64 B) || deflate-raw("<type> <id> <version>\n" + payload)
+// The signature covers DOMAIN || the compressed part. Loaders refuse a version lower than one they ran.
+export async function seal(jwk, { type, id, payload, version = Math.floor(Date.now() / 1000) }) {
   if (!TYPES.includes(type)) throw new Error(`type must be one of ${TYPES}`);
   if (!/^[\w.-]+$/.test(id)) throw new Error('id may only contain letters, digits, _ . -');
+  if (!Number.isSafeInteger(version) || version < 0 || version > 999999999999999) throw new Error('version must be a non-negative integer');
   const key = await crypto.subtle.importKey('jwk', jwk, 'Ed25519', false, ['sign']);
-  const body = await deflate(concat(Buffer.from(`${type} ${id}\n`), payload));
-  const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', key, body));
+  const body = await deflate(concat(Buffer.from(`${type} ${id} ${version}\n`), payload));
+  const sig = new Uint8Array(await crypto.subtle.sign('Ed25519', key, cat(DOMAIN, body)));
   return concat(sig, body);
 }
 
@@ -87,19 +95,24 @@ async function main([cmd, ...argv]) {
 
   if (cmd === 'keygen') {
     const file = pos[0] ?? 'signing-key.json', { jwk, publicKey } = await keygen();
-    await writeFile(file, JSON.stringify(jwk), { mode: 0o600 });
-    console.log(`Private key written to ${file} (keep it secret, it is gitignored).`);
-    console.log(`Pin this public key in index.html -> TRUSTED_KEYS:\n  '${publicKey}'`);
+    if (file === '-') {
+      process.stdout.write(JSON.stringify(jwk));
+    } else {
+      await writeFile(file, JSON.stringify(jwk), { mode: 0o600 });
+      console.error(`Private key written to ${file} (keep it secret; it is gitignored).`);
+    }
+    console.error(`Public key (set it as the TRUSTED_KEYS variable, see README):\n  ${publicKey}`);
   } else if (cmd === 'sign' && pos[0] && opt.id) {
-    const jwk = JSON.parse(await readFile(opt.key ?? 'signing-key.json', 'utf8'));
+    const fromEnv = !opt.key && process.env.QB_SIGNING_KEY;
+    const jwk = JSON.parse(fromEnv || await readFile(opt.key ?? 'signing-key.json', 'utf8'));
     const type = opt.type ?? pos[0].split('.').pop();
-    const container = await seal(jwk, { type, id: opt.id, payload: await readFile(pos[0]) });
+    const container = await seal(jwk, { type, id: opt.id, payload: await readFile(pos[0]), version: opt.version === undefined ? undefined : +opt.version });
     const { id, n, b, len, frames } = makeFrames(container, { block: +opt.block || 200, count: +opt.frames || undefined });
     console.error(`stream ${id}: ${len} B signed+compressed, ${n} blocks x ${b} B, ${frames.length} frames`);
     if (opt.html) await writeFile(opt.html, PLAYER(frames));
     else console.log(frames.join('\n'));
   } else {
-    console.error('usage: encode.mjs keygen [file] | sign <file> --id <name> [--type t] [--key f] [--block B] [--frames N] [--html out.html]');
+    console.error('usage: encode.mjs keygen [file | -] | sign <file> --id <name> [--type t] [--version N] [--key f] [--block B] [--frames N] [--html out.html]');
     process.exit(1);
   }
 }

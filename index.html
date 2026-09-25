@@ -60,6 +60,32 @@
       padding: 32px; background: var(--bg); color: var(--dim); text-align: center;
     }
     #fatal strong { display: block; color: var(--fg); margin-bottom: 6px; font-size: 16px; }
+    /* Confirmation dialog */
+    #ask {
+      position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px;
+      background: rgba(0, 0, 0, 0.6);
+    }
+    #ask > div {
+      width: 100%; max-width: 360px; padding: 20px; background: #161618;
+      border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 14px;
+    }
+    #ask h2 { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+    #ask p { color: var(--dim); margin-bottom: 18px; overflow-wrap: anywhere; }
+    #ask .row { display: flex; gap: 10px; justify-content: flex-end; }
+    button {
+      font: inherit; color: var(--fg); background: rgba(255, 255, 255, 0.08); cursor: pointer;
+      border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 8px; padding: 8px 16px;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+
+    /* Sandboxed HTML payload */
+    #app { position: fixed; inset: 0; z-index: 5; background: var(--bg); }
+    #app iframe { width: 100%; height: 100%; border: 0; }
+    #app button {
+      position: fixed; top: max(12px, env(safe-area-inset-top)); right: 12px;
+      width: 36px; height: 36px; padding: 0; font-size: 20px; line-height: 1; opacity: 0.7;
+      background: rgba(11, 11, 12, 0.7);
+    }
     .hidden { display: none !important; }
   </style>
 </head>
@@ -71,9 +97,16 @@
     <div id="bar"><i></i></div>
   </div>
   <div id="fatal" class="hidden"><div><strong></strong><span></span></div></div>
+  <div id="ask" class="hidden" role="dialog" aria-modal="true" aria-labelledby="ask-title">
+    <div>
+      <h2 id="ask-title"></h2>
+      <p id="ask-detail"></p>
+      <div class="row"><button id="ask-no">Cancel</button><button id="ask-yes" class="primary">Run</button></div>
+    </div>
+  </div>
 
 <script type="module">
-import { Receiver, importKey } from './fountain.js';
+import { Receiver, loadKey } from './fountain.js';
 
 // Ed25519 public keys (base64url) allowed to sign payloads.
 // Generate a pair with: node tools/encode.mjs keygen   (see README)
@@ -109,16 +142,57 @@ if (missing.length) {
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
+// ---- Local state: highest version run and approvals, per app id --------------
+const store = {
+  get: k => { try { return localStorage.getItem('qb:' + k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem('qb:' + k, v); } catch {} },
+};
+
+// Refuse anything older than what already ran (replay / rollback protection).
+function accept({ id, version }) {
+  if (version < (+store.get('v:' + id) || 0)) throw new Error('older version');
+}
+
+let asking = Promise.resolve(); // one dialog at a time
+function confirmRun({ id, type, version, signer }) {
+  return asking = asking.then(() => new Promise(resolve => {
+    $('ask-title').textContent = `Run “${id}”?`;
+    $('ask-detail').textContent = `${type} · version ${version} · signed by ${signer}`;
+    const done = ok => { $('ask').classList.add('hidden'); resolve(ok); };
+    $('ask-yes').onclick = () => done(true);
+    $('ask-no').onclick = () => done(false);
+    $('ask').classList.remove('hidden');
+    $('ask-yes').focus();
+  }));
+}
+
 // ---- Payload activation -----------------------------------------------------
 const modules = new Map();
 let stream = null, scanning = false, detector = null;
+
+// HTML payloads get an opaque origin (no allow-same-origin): no access to this page's
+// storage, cache or service worker, or to other sites on the same host.
+function runHtml(id, html) {
+  stopScanner();
+  const app = document.createElement('div'), frame = document.createElement('iframe'), close = document.createElement('button');
+  app.id = 'app';
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.title = id;
+  frame.srcdoc = html;
+  close.textContent = '×';
+  close.setAttribute('aria-label', 'Close ' + id);
+  close.onclick = () => { app.remove(); show('Point at a QR stream'); startScanner(); };
+  app.append(frame, close);
+  document.body.append(app);
+  frame.focus();
+}
 
 async function activate({ type, id, payload }) {
   const text = () => new TextDecoder().decode(payload);
   if (type === 'json') {
     modules.set(id, JSON.parse(text()));
   } else if (type === 'html') {
-    location.href = URL.createObjectURL(new Blob([text()], { type: 'text/html' }));
+    runHtml(id, text());
   } else if (type === 'mjs') {
     const url = URL.createObjectURL(new Blob([text()], { type: 'text/javascript' }));
     try {
@@ -145,12 +219,23 @@ async function onScan(raw) {
 
   if (r.error) return show('Rejected', { count: r.error, err: true });
   if (!r.opened) return show('Receiving', { count: `${r.rank}/${r.n}`, pct: r.rank / r.n * 100 });
+
+  const app = r.opened;
+  if (store.get('ok:' + app.id) !== app.signer) { // first run of this app from this signer
+    show('Waiting for confirmation', { count: app.id, pct: 100 });
+    if (!await confirmRun(app)) {
+      receiver.hold(r.id, 30000);
+      return show('Cancelled', { count: app.id });
+    }
+    store.set('ok:' + app.id, app.signer);
+  }
+  store.set('v:' + app.id, String(Math.max(app.version, +store.get('v:' + app.id) || 0)));
   try {
-    show('Running', { count: r.opened.id, pct: 100 });
-    await activate(r.opened);
+    show('Running', { count: app.id, pct: 100 });
+    await activate(app);
   } catch (e) {
     console.error(e);
-    show('Failed to run ' + r.opened.id, { count: e.message, err: true });
+    show('Failed to run ' + app.id, { count: e.message, err: true });
   }
 }
 
@@ -213,7 +298,7 @@ async function scanLoop() {
 
 // ---- Start ------------------------------------------------------------------
 try {
-  receiver = new Receiver(await Promise.all(TRUSTED_KEYS.map(importKey)));
+  receiver = new Receiver(await Promise.all(TRUSTED_KEYS.map(loadKey)), { accept });
 } catch (e) {
   fatal('Unsupported browser', 'Ed25519 signature verification is not available');
   throw e;

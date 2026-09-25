@@ -1,0 +1,50 @@
+name: Deploy
+
+# Publishes the loader to GitHub Pages on every push to main.
+# One-time setup (repo Settings):
+#   1. Pages -> Build and deployment -> Source: "GitHub Actions"
+#   2. Secrets and variables -> Actions -> Variables -> TRUSTED_KEYS:
+#      comma-separated base64url public keys printed by `node tools/encode.mjs keygen`
+#      (public keys, so a variable rather than a secret)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - name: Build (pins TRUSTED_KEYS, copies only the loader files)
+        run: node tools/build.mjs dist
+        env:
+          TRUSTED_KEYS: ${{ vars.TRUSTED_KEYS }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
