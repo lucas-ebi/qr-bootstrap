@@ -13,10 +13,10 @@
   body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
   canvas { width: var(--s); height: var(--s); box-sizing: border-box; border: 2px solid #33ff66; image-rendering: pixelated; }
   #info { width: var(--s); display: flex; justify-content: space-between; }
-  #pad { display: none; grid-template: repeat(2, 64px) / repeat(3, 64px); gap: 8px; }
+  #pad { display: none; grid-template: repeat(2, 72px) / repeat(3, 72px); gap: 6px; }
   @media (pointer: coarse) { #pad { display: grid; } }
   #pad button {
-    font: inherit; font-size: 24px; color: #33ff66; background: #050805; touch-action: none; border: 2px solid #33ff66;
+    font: inherit; font-size: 30px; color: #33ff66; background: #050805; touch-action: none; border: 2px solid #33ff66;
   }
   #pad button:active { background: #33ff66; color: #050805; }
   #pad [data-d="0,-1"] { grid-area: 1 / 2; }
