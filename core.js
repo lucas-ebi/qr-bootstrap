@@ -6,6 +6,7 @@ export const VERSION = 0; // stamped by tools/build.mjs
 
 const CSS = `
 :root { --fg: #33ff66; --dim: #1a9c40; --bg: #050805; --hi: #b6ffc9; }
+:root[data-theme=amber] { --fg: #ffb000; --dim: #a36f00; --bg: #080602; --hi: #ffe2a3; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); }
 body { font: 14px/1.35 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; text-transform: uppercase;
@@ -72,6 +73,7 @@ export async function start(boot) {
   const logEl = document.getElementById('log'), bootLog = logEl?.textContent ?? '';
   document.head.insertAdjacentHTML('beforeend', `<style>${CSS}</style>`);
   document.body.innerHTML = HTML;
+  document.documentElement.dataset.theme = pref('theme') ?? 'green';
   const $ = id => document.getElementById(id);
   const lines = bootLog.split('\n').filter(Boolean);
   const log = s => { lines.push(s); lines.splice(0, lines.length - 40); const el = $('log'); el.textContent = lines.join('\n'); el.scrollTop = el.scrollHeight; };
@@ -180,7 +182,7 @@ export async function start(boot) {
     const b = Math.ceil(e.len / e.n), secs = Math.max(0.5, (now - streams.get(e.id).t0) / 1000), rate = e.rank * b / secs;
     seen = seen.filter(t => now - t < 1000);
     const bar = '▓'.repeat(Math.round(e.rank / e.n * 12)).padEnd(12, '░');
-    status(`RX ${sid} ${Math.floor(e.rank / e.n * 100)}% [${bar}]\n${kb(rate)}/S · ${seen.length} CODES/S · ${Math.ceil((e.n - e.rank + 2) * b / Math.max(rate, 1))} S LEFT`);
+    status(`RX ${sid} ${Math.floor(e.rank / e.n * 100)}% [${bar}]\n${kb(rate)}/S  ${seen.length} CODES/S  ETA ${Math.ceil((e.n - e.rank + 2) * b / Math.max(rate, 1))}S`);
     if (!e.opened && !e.file) return;
     log(`RX ${sid} COMPLETE: ${kb(e.len)} IN ${secs.toFixed(1)} S (${kb(e.len / secs)}/S)`);
     if (e.file) return receivedFile(e);
@@ -267,24 +269,23 @@ export async function start(boot) {
     return null;
   }
 
-  const when = v => v > 1e9 ? new Date(v * 1000).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).replace(',', '') : 'VERSION ' + v;
-  const KIND = { html: 'APP', mjs: 'MODULE', json: 'DATA' };
 
   async function library() {
     const apps = (await db.list('app:')).filter(a => a.id !== 'loader'), files = await db.list('file:');
     const lc = await loaderContainer(), stored = await db.get('app:loader'), el = $('lib');
     const btn = (a, key, label) => `<button data-a="${a}" data-k="${key}">${label}</button>`;
     const item = (name, what, key, open) => `<div class="item">${esc(name)}<br><span class="dim">${esc(what)}</span><div class="row">` +
-      (open ? btn('open', key, open) : '') + btn('tx', key, 'SHOW QR') + btn('gif', key, 'SAVE GIF') + (key !== 'loader' ? btn('del', key, 'DELETE') : '') + '</div></div>';
-    const loader = `<div class="item">LOADER<br><span class="dim">${boot.source === 'stored' ? 'UPDATED OVER QR' : 'BUILT IN'} · ${esc(when(boot.version))}` +
-      `${boot.bad.length ? ' · A NEWER UPDATE FAILED TO START' : ''}</span>` +
-      (lc ? `<div class="row">${btn('tx', 'loader', 'SHOW QR')}${btn('gif', 'loader', 'SAVE GIF')}</div>` : '') + '</div>';
-    el.innerHTML = `<div class="box"><h2>LIBRARY</h2>` +
-      `<p class="dim">SHOW QR PLAYS AN ITEM AS A QR STREAM FOR ANOTHER PHONE TO SCAN. SAVE GIF STORES THE SAME STREAM AS A FILE.</p>` + loader +
-      apps.map(a => item(a.id, `${KIND[a.type] ?? a.type} · ${when(a.version)} · ${kb(a.size)}`, 'app:' + a.id, 'OPEN')).join('') +
-      files.map(f => item(f.name, `FILE · ${f.mime} · ${kb(f.size)}`, 'file:' + f.id, 'SAVE')).join('') +
-      `<div class="row" style="margin-top:14px"><button data-a="send"><b>S</b>END A FILE</button>` +
-      (stored || boot.bad.length ? '<button data-a="reset">UNDO LOADER UPDATE</button>' : '') +
+      (open ? btn('open', key, open) : '') + btn('tx', key, 'TX') + btn('gif', key, 'GIF') + (key !== 'loader' ? btn('del', key, 'DEL') : '') + '</div></div>';
+    const loader = `<div class="item">LOADER<br><span class="dim">MJS V${boot.version} ${boot.source === 'stored' ? 'STORED' : 'BUNDLED'}` +
+      `${boot.bad.length ? ', FAILED: ' + boot.bad.join(' ') : ''}</span>` +
+      (lc ? `<div class="row">${btn('tx', 'loader', 'TX')}${btn('gif', 'loader', 'GIF')}</div>` : '') + '</div>';
+    el.innerHTML = `<div class="box"><h2>DIR</h2>` +
+      `<p class="dim">RUN: START · TX: TRANSMIT AS QR STREAM · GIF: SAVE STREAM AS GIF · DEL: DELETE · BUNDLED: SHIPPED WITH THE SITE · STORED: RECEIVED OVER QR · V: SIGNING TIME</p>` + loader +
+      apps.map(a => item(a.id, `${a.type} V${a.version} ${kb(a.size)}`, 'app:' + a.id, 'RUN')).join('') +
+      files.map(f => item(f.name, `${f.mime} ${kb(f.size)}`, 'file:' + f.id, 'SAVE')).join('') +
+      `<p class="dim">${apps.length + files.length + 1} ENTRIES</p><div class="row" style="margin-top:14px"><button data-a="send"><b>S</b>END FILE</button>` +
+      `<button data-a="theme">${pref('theme') === 'amber' ? 'GREEN' : 'AMBER'}</button>` +
+      (stored || boot.bad.length ? '<button data-a="reset">RESET LOADER</button>' : '') +
       `<button data-a="close">[<b>X</b>] CLOSE</button></div></div>`;
     el.classList.remove('hidden');
     el.onclick = async e => {
@@ -293,7 +294,8 @@ export async function start(boot) {
       const { a, k = '' } = b.dataset, rec = k && k !== 'loader' ? await db.get(k) : null;
       const container = k === 'loader' ? lc : rec?.container, name = k === 'loader' ? 'loader' : k.startsWith('file:') ? rec?.name : rec?.id;
       if (a === 'close') el.classList.add('hidden');
-      else if (a === 'reset') { if (await ask('UNDO LOADER UPDATE?', 'Forget the loader received over QR and go back to the one built into this app.', 'UNDO', 'NO')) boot.reset(); }
+      else if (a === 'theme') { pref('theme', pref('theme') === 'amber' ? 'green' : 'amber'); document.documentElement.dataset.theme = pref('theme'); library(); }
+      else if (a === 'reset') { if (await ask('RESET LOADER?', 'Forget the loader received over QR and start the bundled one.', 'RESET', 'NO')) boot.reset(); }
       else if (a === 'send') $('f-send').click();
       else if (a === 'del') { if (await ask(`DELETE "${name}"?`, 'It is removed from this device.', 'DELETE', 'NO')) { await db.del(k); library(); } }
       else if (a === 'tx') { el.classList.add('hidden'); transmit(container, name); }
@@ -327,7 +329,7 @@ export async function start(boot) {
     let t0 = performance.now();
     const info = digit => {
       el.querySelector('.st').textContent = `TX "${name}"  ${kb(container.length)} IN ${enc.n} BLOCKS OF ${kb(enc.b)}\n` +
-        (digit ? `COUNTDOWN ${digit}: SCAN WITH A CAMERA APP TO OPEN THE LOADER` : `${tx.fps} FRAMES/S · ${tx.codes} ${tx.codes > 1 ? 'CODES' : 'CODE'} ON SCREEN · ${kb(tx.fps * tx.codes * enc.b)}/S`);
+        (digit ? `COUNTDOWN ${digit}: SCAN WITH A CAMERA APP TO OPEN THE LOADER` : `${tx.fps} FPS x ${tx.codes} CODES = ${kb(tx.fps * tx.codes * enc.b)}/S  SEED ${seed}`);
     };
     const paint = (c, px, side) => {
       if (c.width !== side) c.width = c.height = side;
@@ -368,8 +370,8 @@ export async function start(boot) {
     };
     const keys = e => ({ ArrowUp: () => set('fps', Math.min(30, tx.fps + 1)), ArrowDown: () => set('fps', Math.max(2, tx.fps - 1)),
       d: () => set('density', (tx.density + 1) % DENSITY.length), c: () => set('codes', [1, 2, 4][([1, 2, 4].indexOf(tx.codes) + 1) % 3]), Escape: close, x: close })[e.key]?.();
-    el.querySelector('.row').innerHTML = '<button data-k="ArrowDown">SLOWER</button><button data-k="ArrowUp">FASTER</button>' +
-      '<button data-k="d">CODE SIZE</button><button data-k="c">CODES ON SCREEN</button><button data-k="x">[<b>X</b>] STOP</button>';
+    el.querySelector('.row').innerHTML = '<button data-k="ArrowDown">FPS-</button><button data-k="ArrowUp">FPS+</button>' +
+      '<button data-k="d"><b>D</b>ENSITY</button><button data-k="c"><b>C</b>ODES</button><button data-k="x">[<b>X</b>]</button>';
     el.querySelector('.row').onclick = e => { const b = e.target.closest('button'); if (b) keys({ key: b.dataset.k }); };
     addEventListener('keydown', keys);
     addEventListener('resize', layout);

@@ -20,7 +20,7 @@ const shots = process.argv[2];
 if (shots) await mkdir(shots, { recursive: true });
 
 const signer = await keygen(), otherSigner = await keygen(), stranger = await keygen();
-const BUNDLED = 100;
+let BUNDLED = 100; // changed mid-test to stand for a new deployment
 const stream = async (who, type, id, payload, version, block = 400) =>
   makeFrames(await seal(who.jwk, { type, id, payload: Buffer.from(payload), version }), { block, count: 80 });
 const lossy = frames => frames.filter(() => Math.random() > 0.3).sort(() => Math.random() - 0.5);
@@ -180,7 +180,7 @@ await A.click('#app > button');
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir = await A.textContent('#lib');
-check('the library lists the loader and the received apps', /BUILT IN · VERSION 100/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /SHOW QR/.test(dir) && !/AMBER|UNDO/.test(dir), dir.replace(/\s+/g, ' ').slice(0, 160));
+check('the library lists the loader and the received apps', /MJS V100 BUNDLED/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /TX: TRANSMIT/.test(dir) && /AMBER/.test(dir) && !/RESET/.test(dir), dir.replace(/\s+/g, ' ').slice(0, 160));
 await shot(A, 'library');
 await A.click('#lib button[data-a="close"]');
 check('tapping CLOSE closes the library', await A.locator('#lib').isHidden());
@@ -268,15 +268,24 @@ await ready(A);
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir2 = await A.textContent('#lib');
-check('a core that fails to start is marked bad and the built-in one returns', /BUILT IN · VERSION 100 · A NEWER UPDATE FAILED/i.test(dir2), dir2.replace(/\s+/g, ' ').slice(0, 160));
+check('a core that fails to start is marked bad and the built-in one returns', /V100 BUNDLED, FAILED: 300/i.test(dir2), dir2.replace(/\s+/g, ' ').slice(0, 160));
 await A.click('#lib button[data-a="reset"]');
-check('UNDO LOADER UPDATE asks first', /UNDO LOADER UPDATE/.test(await dialog(A)));
-await Promise.all([A.waitForNavigation(), A.keyboard.press('u')]);
+check('RESET LOADER asks first', /RESET LOADER/.test(await dialog(A)));
+await Promise.all([A.waitForNavigation(), A.keyboard.press('r')]);
 await ready(A);
 await A.click('#b-lib');
 await A.waitForSelector('#lib:not(.hidden)');
-check('and then the stored loader is gone', !/UNDO|FAILED/.test(await A.textContent('#lib')));
+check('and then the stored loader is gone', !/RESET|FAILED/.test(await A.textContent('#lib')));
+await A.click('#lib button[data-a="theme"]');
+check('AMBER switches the colours', await A.evaluate(() => document.documentElement.dataset.theme === 'amber'));
+await A.click('#lib button[data-a="theme"]');
 await A.click('#lib button[data-a="close"]');
+
+// A new deployment appears on the first reload, not the second
+BUNDLED = 101;
+await A.reload();
+await ready(A);
+check('a new deployment shows on the first reload', /CORE 101 \(BUNDLED\)/.test(await logText(A)), (await logText(A)).split('\n').find(l => /CORE/.test(l)));
 
 // Offline: the service worker serves everything, and stored apps still run
 await ctxA.setOffline(true);
@@ -304,7 +313,7 @@ await ctxA.setOffline(false);
   check('each cycle opens with a countdown to the #scan address', /COUNTDOWN [1-3]/.test(await P.textContent('#tx .st')) && seen[0] === URL_ + '#scan', JSON.stringify(seen));
   await shot(P, 'landing');
   await P.waitForFunction(() => !/COUNTDOWN/.test(document.querySelector('#tx .st').textContent), null, { timeout: 8000 });
-  check('then the data frames follow', /FRAMES\/S · 1 CODE ON SCREEN/i.test(await P.textContent('#tx .st')));
+  check('then the data frames follow', /15 FPS x 1 CODES/i.test(await P.textContent('#tx .st')));
   await P.click('#tx button[data-k="x"]');
   await P.waitForFunction(() => /CAMERA 1280X720/.test(document.getElementById('log').textContent));
   check('closing it starts the scanner', true);

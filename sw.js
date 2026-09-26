@@ -1,6 +1,7 @@
 // Service worker: every file the loader needs is cached at installation, so that it works without a
-// network afterwards. Stale-while-revalidate: an installed copy picks up a new deployment on the
-// next launch when a network happens to be available.
+// network afterwards. Network first: when a network is available each file is fetched fresh (and the
+// cache refreshed), so a new deployment appears on the first visit; the cache answers when the
+// network fails or takes longer than a few seconds.
 const CACHE = 'qr-bootstrap';
 const ASSETS = [
   './', 'index.html', 'boot.js', 'core.js', 'fountain.js', 'gif.js', 'decode-worker.js', 'manifest.json',
@@ -21,16 +22,22 @@ self.addEventListener('activate', e => {
     .then(() => self.clients.claim()));
 });
 
+const TIMEOUT = 4000; // ms before a slow network gives way to the cache
+
 self.addEventListener('fetch', e => {
   const { request } = e;
   if (request.method !== 'GET' || new URL(request.url).origin !== location.origin) return;
   e.respondWith(caches.open(CACHE).then(async cache => {
-    const cached = await cache.match(request, { ignoreSearch: true });
-    const fresh = fetch(request).then(res => {
+    const fresh = fetch(request, { cache: 'no-cache' }).then(res => {
       if (res.ok) cache.put(request, res.clone());
       return res;
     });
-    if (cached) { fresh.catch(() => {}); return cached; }
-    return fresh;
+    const late = new Promise(r => setTimeout(r, TIMEOUT));
+    try {
+      const res = await Promise.race([fresh, late]);
+      if (res?.ok) return res;
+    } catch {}
+    const cached = await cache.match(request, { ignoreSearch: true });
+    return cached ?? fresh;
   }));
 });
