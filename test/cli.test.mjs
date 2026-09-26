@@ -5,7 +5,7 @@ import { mkdtemp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { Receiver, loadKey } from '../fountain.js';
+import { PROTOCOL, Receiver, loadKey } from '../fountain.js';
 import { parseGif, readQr } from './helpers/gif.mjs';
 import { readFile } from 'node:fs/promises';
 
@@ -24,10 +24,10 @@ test('keygen - prints the private key to stdout, the public key to stderr, and w
   assert.deepEqual(await readdir(cwd), []);
 });
 
-test('sign uses QB_SIGNING_KEY (as in CI), and the frames decode under the public key', async () => {
+test('sign uses QR_BOOTSTRAP_SIGNING_KEY (as in CI), and the frames decode under the public key', async () => {
   const { stdout: key } = await node(['keygen', '-']);
   const publicKey = JSON.parse(key).x;
-  const { stdout, stderr: log } = await node(['sign', snake, '--id', 'snake', '--version', '7'], { QB_SIGNING_KEY: key });
+  const { stdout, stderr: log } = await node(['sign', snake, '--id', 'snake', '--version', '7'], { QR_BOOTSTRAP_SIGNING_KEY: key });
   assert.ok(!log.includes(JSON.parse(key).d), 'log never contains the private key');
 
   const rx = new Receiver([await loadKey(publicKey)]);
@@ -38,27 +38,27 @@ test('sign uses QB_SIGNING_KEY (as in CI), and the frames decode under the publi
 
 test('sign with no key anywhere fails instead of signing with something else', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'qrboot-cli-'));
-  await assert.rejects(node(['sign', snake, '--id', 'snake'], { QB_SIGNING_KEY: '' }, cwd), /ENOENT|signing-key/);
+  await assert.rejects(node(['sign', snake, '--id', 'snake'], { QR_BOOTSTRAP_SIGNING_KEY: '' }, cwd), /ENOENT|signing-key/);
 });
 
 test('sign --gif writes a standalone looping GIF with a countdown to --url', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'qrboot-cli-'));
   const { stdout: key } = await node(['keygen', '-']);
   const url = 'https://example.github.io/qr-bootstrap/';
-  const { stderr } = await node(['sign', snake, '--id', 'snake', '--gif', join(dir, 's.gif'), '--url', url, '--intro', '3', '--scale', '5'], { QB_SIGNING_KEY: key });
+  const { stderr } = await node(['sign', snake, '--id', 'snake', '--gif', join(dir, 's.gif'), '--url', url, '--intro', '3', '--scale', '5'], { QR_BOOTSTRAP_SIGNING_KEY: key });
   assert.match(stderr, /3 s countdown/);
   const gif = parseGif(new Uint8Array(await readFile(join(dir, 's.gif'))));
   assert.ok(gif.loops && gif.frames.length > 3);
   assert.deepEqual(gif.frames.slice(0, 3).map(f => f.delay), [100, 100, 100]);
-  assert.equal(readQr(gif.frames[0].pixels, gif.width, gif.height), url);
-  assert.match(readQr(gif.frames[3].pixels, gif.width, gif.height), /^QB1\//);
+  assert.equal(readQr(gif.frames[0].pixels, gif.width, gif.height), url + '#scan', 'the countdown opens the loader on its scanner');
+  assert.ok(readQr(gif.frames[3].pixels, gif.width, gif.height).startsWith(PROTOCOL + '/'));
   assert.deepEqual(await readdir(dir), ['s.gif']);
 });
 
 test('--gif options are validated before anything is written', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'qrboot-cli-'));
   const { stdout: key } = await node(['keygen', '-']);
-  const sign = extra => node(['sign', snake, '--id', 'snake', '--gif', join(dir, 'x.gif'), ...extra], { QB_SIGNING_KEY: key });
+  const sign = extra => node(['sign', snake, '--id', 'snake', '--gif', join(dir, 'x.gif'), ...extra], { QR_BOOTSTRAP_SIGNING_KEY: key });
   await assert.rejects(sign(['--intro', '3']), /--intro needs --url/);
   await assert.rejects(sign(['--url', 'ftp://example.com']), /http\(s\) URL/);
   for (const bad of ['x', '10', '-1', '2.5', '']) await assert.rejects(sign(['--url', 'https://example.com/', '--intro', bad]), /--intro must be/, `intro ${JSON.stringify(bad)}`);

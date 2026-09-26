@@ -1,14 +1,14 @@
-// Turns QB1 frame strings into a standalone animated GIF of QR codes (black/white, loops forever),
-// optionally preceded by a countdown intro: QR codes of the loader's URL with a film-leader style
-// digit in the middle, so a phone's native camera can open the web app before the data starts.
-// Uses the vendored qrcode-generator for the QR matrices; the GIF encoder is ~50 lines below.
+// QR frames as a standalone animated GIF (black/white, loops forever), optionally preceded by a
+// film-leader countdown of QR codes pointing at the loader's URL; and a minimal GIF decoder, so the
+// loader can read such a file without a camera. Browser and Node alike; QR matrices come from the
+// vendored qrcode-generator.
 import qrcode from './vendor/qrcode.mjs';
 
 const QUIET = 4; // quiet-zone width in modules, as the QR spec asks
 
 // Draws every frame as a QR code at the same QR version, so all GIF frames share one size.
 // Returns { width, height, frames: Uint8Array[] } with pixel values 0 = white, 1 = black.
-export function renderFrames(texts, { scale = 8, ecc = 'M' } = {}) {
+export function renderFrames(texts, { scale = 8, ecc = 'L' } = {}) {
   const make = (text, version) => {
     const q = qrcode(version, ecc);
     q.addData(text, 'Alphanumeric');
@@ -118,11 +118,11 @@ function lzw(pixels) {
 
 // delay is in hundredths of a second per frame; delays[i], when given, overrides it for frame i.
 export function encodeGif({ width, height, frames }, { delay = 17, delays = [] } = {}) {
-  const u16 = n => [n & 255, n >> 8];
+  const u16 = n => [n & 255, n >> 8], ascii = s => [...s].map(c => c.charCodeAt(0));
   const out = [
-    ...Buffer.from('GIF89a'), ...u16(width), ...u16(height), 0x90, 0, 0, // 2-colour global table
+    ...ascii('GIF89a'), ...u16(width), ...u16(height), 0x90, 0, 0, // 2-colour global table
     255, 255, 255, 0, 0, 0,                                              // white, black
-    0x21, 0xFF, 0x0B, ...Buffer.from('NETSCAPE2.0'), 3, 1, 0, 0, 0,      // loop forever
+    0x21, 0xFF, 0x0B, ...ascii('NETSCAPE2.0'), 3, 1, 0, 0, 0,      // loop forever
   ];
   for (const [i, px] of frames.entries()) {
     out.push(0x21, 0xF9, 4, 0x04, ...u16(delays[i] ?? delay), 0, 0);     // frame delay
@@ -136,4 +136,66 @@ export function encodeGif({ width, height, frames }, { delay = 17, delays = [] }
   }
   out.push(0x3B);
   return Uint8Array.from(out);
+}
+
+function unlzw(bytes, min, size) {
+  const clear = 1 << min, out = new Uint8Array(size), pre = new Int32Array(4096), suf = new Uint8Array(4096), len = new Uint16Array(4096);
+  let next, bits, prev = -1, o = 0, cur = 0, have = 0;
+  for (let i = 0; i < clear; i++) [pre[i], suf[i], len[i]] = [-1, i, 1];
+  const reset = () => { next = clear + 2; bits = min + 1; prev = -1; };
+  const first = c => { while (pre[c] >= 0) c = pre[c]; return suf[c]; };
+  const put = c => { // writes the string for code c
+    const l = len[c];
+    for (let i = l - 1, k = c; i >= 0; i--, k = pre[k]) if (o + i < size) out[o + i] = suf[k];
+    o += l;
+  };
+  reset();
+  for (let p = 0; ;) {
+    while (have < bits && p < bytes.length) { cur |= bytes[p++] << have; have += 8; }
+    if (have < bits) break;
+    const c = cur & ((1 << bits) - 1);
+    cur >>>= bits;
+    have -= bits;
+    if (c === clear) { reset(); continue; }
+    if (c === clear + 1 || o >= size) break;
+    if (prev >= 0 && next < 4096) {
+      [pre[next], suf[next], len[next]] = [prev, first(c < next ? c : prev), len[prev] + 1];
+      next++;
+      if (next === 1 << bits && bits < 12) bits++;
+    }
+    if (c >= next) throw new Error('bad GIF data');
+    put(c);
+    prev = c;
+  }
+  return out;
+}
+
+// Decodes a GIF into full-canvas frames of palette indices: { width, height, palette, frames }.
+// Enough for the loader's own files and other simple GIFs; transparency is not composited.
+export function decodeGif(b) {
+  const u16 = i => b[i] | (b[i + 1] << 8), ct = f => f & 0x80 ? 3 << ((f & 7) + 1) : 0;
+  if (String.fromCharCode(...b.subarray(0, 3)) !== 'GIF') throw new Error('not a GIF');
+  const width = u16(6), height = u16(8), gct = ct(b[10]), palette = b.slice(13, 13 + gct);
+  const frames = [], canvas = new Uint8Array(width * height);
+  let p = 13 + gct;
+  const blocks = () => {
+    const parts = [];
+    for (let n = b[p++]; n; n = b[p++]) parts.push(b.subarray(p, p += n));
+    const out = new Uint8Array(parts.reduce((s, x) => s + x.length, 0));
+    parts.reduce((o, x) => (out.set(x, o), o + x.length), 0);
+    return out;
+  };
+  while (p < b.length) {
+    const kind = b[p++];
+    if (kind === 0x21) { p++; blocks(); }
+    else if (kind === 0x2C) {
+      const [x, y, w, h, f] = [u16(p), u16(p + 2), u16(p + 4), u16(p + 6), b[p + 8]];
+      p += 9 + ct(f);
+      if (f & 0x40) throw new Error('interlaced GIFs are not supported');
+      const min = b[p++], px = unlzw(blocks(), min, w * h);
+      for (let r = 0; r < h && y + r < height; r++) canvas.set(px.subarray(r * w, r * w + Math.min(w, width - x)), (y + r) * width + x);
+      frames.push(canvas.slice());
+    } else break;
+  }
+  return { width, height, palette, frames };
 }

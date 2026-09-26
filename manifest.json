@@ -1,13 +1,13 @@
 {
   "name": "QR Bootstrap Loader",
   "short_name": "QR Boot",
-  "description": "Receives signed software over an animated QR stream and runs it, offline",
-  "start_url": "./",
+  "description": "Receives signed programs and files over streams of QR codes, and passes them on, without a network",
+  "start_url": "./#scan",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b0b0c",
-  "theme_color": "#0b0b0c",
+  "background_color": "#050805",
+  "theme_color": "#050805",
   "icons": [
     {
       "src": "icon-192.png",

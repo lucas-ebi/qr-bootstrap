@@ -1,6 +1,7 @@
 # Security policy
 
-QR Bootstrap receives software over QR codes and runs it, so security reports are taken seriously.
+QR Bootstrap receives programs over an optical channel and executes them, and its security model is
+set out in Section 4 of the [README](README.md). Reports of weaknesses in that model are welcome.
 
 ## Reporting a vulnerability
 
@@ -15,19 +16,22 @@ Only the latest commit on `main` (the deployed loader) is supported.
 
 ## What is in scope
 
-- Ways to make the loader run a payload that was not signed by a pinned key, or to bypass the version (replay) check or the first-run confirmation.
-- Escapes from the HTML payload sandbox.
-- Crafted QR frames that hang the loader, exhaust memory, or otherwise cause denial of service.
-- Service worker or caching behavior that lets content persist or be replaced unexpectedly.
-- Vulnerabilities in the vendored jsQR fallback as used here (please also report them upstream).
-- Problems in the build, signing or deploy tooling and workflows (`tools/`, `.github/workflows/`), such as key leakage.
+- Execution of code not signed by a trusted key; circumvention of the version check or of the approval of new signers.
+- Execution or active rendering of a received file.
+- A core, stored or received, that changes the trusted keys or evades the rollback mechanism of `boot.js`.
+- Escapes from the sandbox of HTML programs.
+- Frames that cause excessive memory or time consumption before validation.
+- Service-worker or storage behaviour that lets content persist or be replaced unexpectedly.
+- Weaknesses in the vendored decoders as used here (please also report them upstream).
+- Weaknesses in the build, signing and deployment tooling (`tools/`, `.github/workflows/`), such as key disclosure.
 
 ## What is out of scope (by design)
 
-- A payload signed by a trusted key doing harmful things. Trusting a signer is the model; see "Trust model" in the [README](README.md).
-- `mjs` modules having the loader's full privileges. This is documented and intentional.
-- Browsers that lack camera access or Ed25519 support.
+- Harmful behaviour of code signed by a trusted key; trust in the signer is the premise of the model.
+- The privileges of `mjs` modules, which run in the receiver's context by design.
+- The absence of authenticity for files (only integrity is provided).
+- Browsers without camera access or Ed25519 support.
 
 ## If a signing key may be compromised
 
-Rotate it as described under "Hardening the deployment" in the [README](README.md): add a new key to `TRUSTED_KEYS`, redeploy, sign with the new key, then remove the old one.
+Rotate it as described in Section 7.4 of the [README](README.md).

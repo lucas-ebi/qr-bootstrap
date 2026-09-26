@@ -28,7 +28,7 @@ on:
       block:
         description: 'Bytes per QR block'
         required: false
-        default: '200'
+        default: '700'
       intro:
         description: 'Seconds of countdown to the loader URL at the start of each loop (0 to disable, max 9)'
         required: false
@@ -59,7 +59,7 @@ jobs:
             ${VERSION:+--version "$VERSION"} --url "$LOADER_URL" --intro "$INTRO" \
             --gif "$RUNNER_TEMP/$APP_ID.gif"
         env:
-          QB_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          QR_BOOTSTRAP_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           FILE: ${{ inputs.file }}
           APP_ID: ${{ inputs.id }}
           VERSION: ${{ inputs.version }}
