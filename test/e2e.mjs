@@ -35,6 +35,7 @@ const coreAt = (v, extra = '') => coreSrc.replace('export const VERSION = 0;', `
 const core200 = await stream(signer, 'mjs', 'loader', coreAt(200, 'globalThis.__core = 200;'), 200, 1200);
 const core300 = await stream(signer, 'mjs', 'loader', coreAt(300, 'throw new Error("broken core");'), 300, 1200);
 const snakeGif = encodeGif(renderFrames(snake.frames.slice(0, 40), { scale: 4 }), { delay: 10 });
+const snake2Gif = encodeGif(renderFrames((await stream(signer, 'html', 'snake', await readFile(new URL('examples/snake.html', root)), 2)).frames.slice(0, 40), { scale: 4 }), { delay: 10 });
 
 const MIME = { html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', json: 'application/json', png: 'image/png', wasm: 'application/wasm' };
 const trusted = [signer, otherSigner].map(k => `'${k.publicKey}'`).join(', ');
@@ -362,10 +363,25 @@ const fits = await tf.evaluate(() => ['#board', '#pad', '#side'].map(s => { cons
 check('tetris fits a 390x844 phone with its buttons', fits.every(Boolean), JSON.stringify(fits));
 const barOk = await C.evaluate(() => document.querySelector('#app .bar button').getBoundingClientRect().bottom <= document.querySelector('#app iframe').getBoundingClientRect().top);
 check('the close button sits in its own bar, above the app, not over it', barOk);
-await tf.locator('button[aria-label="Drop"]').tap();
+check('tetris: the pad is just the four arrows', (await tf.locator('#pad button').count()) === 4);
+const padStyle = f => f.evaluate(() => [...document.querySelectorAll('#pad button')].map(b => { const r = b.getBoundingClientRect(), c = getComputedStyle(b); return [b.textContent, Math.round(r.width), Math.round(r.height), c.fontSize, c.borderTopWidth, c.color]; }).sort().join('|'));
+const tetrisPad = await padStyle(tf);
+await tf.locator('button[aria-label="Down"]').tap();
+await tf.locator('button[aria-label="Down"]').tap();
 await C.waitForTimeout(150);
-check('tetris: tapping Drop scores', /^Tetris [1-9]/.test(await tf.title()), await tf.title());
+check('tetris: a double tap on ▼ drops the piece and scores', /^Tetris [1-9]/.test(await tf.title()), await tf.title());
 await shot(C, 'tetris-phone');
+await C.click('#app .bar button');
+await C.setInputFiles('#f-open', { name: 'snake2.gif', mimeType: 'image/gif', buffer: Buffer.from(snake2Gif) });
+await dialog(C);
+await answer(C, 'y');
+const sf = await (await C.waitForSelector('#app iframe')).contentFrame();
+await sf.waitForSelector('#pad');
+const snakePad = await padStyle(sf);
+check('snake and tetris use the same arrow pad', snakePad === tetrisPad, snakePad === tetrisPad ? '' : `${snakePad} vs ${tetrisPad}`);
+const snakeFits = await sf.evaluate(() => ['#c', '#pad', '#info'].every(s => { const r = document.querySelector(s).getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
+check('snake fits a 390x844 phone with its arrows', snakeFits);
+await shot(C, 'snake-phone');
 await C.click('#app .bar button');
 
 // Phone: the transmit view fits, and a GIF can be exported
