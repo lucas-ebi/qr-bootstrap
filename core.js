@@ -247,7 +247,7 @@ export async function start(boot) {
       frame.setAttribute('sandbox', 'allow-scripts');
       frame.title = id;
       frame.srcdoc = text;
-      close.textContent = '[X]';
+      close.innerHTML = '[<b>X</b>]'; // underlined like the other shortcuts
       close.setAttribute('aria-label', 'Close ' + id);
       close.onclick = () => { app.remove(); $('lines').classList.remove('hidden'); paused = false; };
       bar.append(close);

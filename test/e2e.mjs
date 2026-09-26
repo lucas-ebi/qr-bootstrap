@@ -369,6 +369,7 @@ const fits = await tf.evaluate(() => ['#board', '#pad', '#side'].map(s => { cons
 check('tetris fits a 390x844 phone with its buttons', fits.every(Boolean), JSON.stringify(fits));
 const barOk = await C.evaluate(() => document.querySelector('#app .bar button').getBoundingClientRect().bottom <= document.querySelector('#app iframe').getBoundingClientRect().top);
 check('the close button sits in its own bar, above the app, not over it', barOk);
+check('its X is underlined like the other shortcuts', await C.evaluate(() => getComputedStyle(document.querySelector('#app .bar button b')).textDecorationLine === 'underline'));
 check('tetris: the pad is just the four arrows', (await tf.locator('#pad button').count()) === 4);
 const padStyle = f => f.evaluate(() => [...document.querySelectorAll('#pad button')].map(b => { const r = b.getBoundingClientRect(), c = getComputedStyle(b); return [b.textContent, Math.round(r.width), Math.round(r.height), c.fontSize, c.borderTopWidth, c.color]; }).sort().join('|'));
 const tetrisPad = await padStyle(tf);
