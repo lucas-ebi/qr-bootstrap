@@ -369,6 +369,7 @@ const fits = await tf.evaluate(() => ['#board', '#pad', '#side'].map(s => { cons
 check('tetris fits a 390x844 phone with its buttons', fits.every(Boolean), JSON.stringify(fits));
 const barOk = await C.evaluate(() => document.querySelector('#app .bar button').getBoundingClientRect().bottom <= document.querySelector('#app iframe').getBoundingClientRect().top);
 check('the close button sits in its own bar, above the app, not over it', barOk);
+check('its X is underlined like the other shortcuts', await C.evaluate(() => getComputedStyle(document.querySelector('#app .bar button b')).textDecorationLine === 'underline'));
 check('tetris: the pad is just the four arrows', (await tf.locator('#pad button').count()) === 4);
 const padStyle = f => f.evaluate(() => [...document.querySelectorAll('#pad button')].map(b => { const r = b.getBoundingClientRect(), c = getComputedStyle(b); return [b.textContent, Math.round(r.width), Math.round(r.height), c.fontSize, c.borderTopWidth, c.color]; }).sort().join('|'));
 const tetrisPad = await padStyle(tf);
@@ -389,6 +390,24 @@ const snakeFits = await sf.evaluate(() => ['#c', '#pad', '#info'].every(s => { c
 check('snake fits a 390x844 phone with its arrows', snakeFits);
 await shot(C, 'snake-phone');
 await C.click('#app .bar button');
+
+// A small phone with Safari's toolbars (375 x 560 visible): nothing cut off, the board gets most of the height
+{
+  const { page: S } = await open({ viewport: { width: 375, height: 560 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }, () => { window.__noCamera = true; });
+  await text(S, tetris.frames);
+  await dialog(S);
+  await answer(S, 'y');
+  const f = await (await S.waitForSelector('#app iframe')).contentFrame();
+  await f.waitForSelector('#board');
+  await S.waitForTimeout(200);
+  const m = await f.evaluate(() => {
+    const r = s => document.querySelector(s).getBoundingClientRect(), inside = s => { const b = r(s); return b.top >= 0 && b.left >= 0 && b.bottom <= innerHeight && b.right <= innerWidth; };
+    return { fits: ['#side', '#board', '#pad'].every(inside), share: r('#board').height / innerHeight, shape: r('#board').height / r('#board').width };
+  });
+  check('small phone: tetris fits entirely, the board takes over half the height and keeps its shape', m.fits && m.share > 0.5 && Math.abs(m.shape - 2) < 0.05, JSON.stringify(m));
+  await shot(S, 'tetris-small-phone');
+  await S.context().close();
+}
 
 // Phone: the transmit view fits, and a GIF can be exported
 await C.click('#b-lib');
