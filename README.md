@@ -101,7 +101,7 @@ directly.
 
 ### 3.4 Presentation
 
-The interface imitates a phosphor terminal: green (or amber) monospaced text, a boot log in place
+The interface imitates a phosphor terminal: green monospaced text, a boot log in place
 of progress indicators, a directory listing for stored items, and dialogs answered with keys.
 The QR codes themselves are always drawn black on white, as reliable decoding requires. Every
 program and module is subject to a size budget (`test/budget.test.mjs`), measured after compression
