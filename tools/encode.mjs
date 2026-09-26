@@ -53,6 +53,15 @@ export async function makeFrames(container, { block = 700, count, start = 1 } = 
   return { ...e, frames: Array.from({ length: count }, (_, i) => e.frame(start + i)) };
 }
 
+// A looping GIF of the frames, preceded by `intro` seconds of countdown to `url` when given.
+export function makeGif(frames, { url, intro = 5, scale = 8, fps = 10, ecc = 'L' } = {}) {
+  const img = renderFrames(frames, { scale, ecc });
+  const secs = url ? intro : 0;
+  const lead = secs ? renderIntro(scanUrl(url), Array.from({ length: secs }, (_, i) => secs - i), img.width) : [];
+  const gif = encodeGif({ ...img, frames: [...lead, ...img.frames] }, { delay: Math.round(100 / fps), delays: lead.map(() => 100) });
+  return { gif, img, secs };
+}
+
 async function main([cmd, ...argv]) {
   const opt = {}, pos = [];
   for (let i = 0; i < argv.length; i++) argv[i].startsWith('--') ? opt[argv[i].slice(2)] = argv[++i] : pos.push(argv[i]);
@@ -77,11 +86,7 @@ async function main([cmd, ...argv]) {
       if (opt.intro !== undefined && !opt.url) throw new Error('--intro needs --url <loader URL>');
       if (opt.intro !== undefined && !/^[0-9]$/.test(opt.intro)) throw new Error('--intro must be a whole number of seconds from 0 to 9');
       if (opt.url && !/^https?:\/\/\S+$/.test(opt.url)) throw new Error('--url must be an http(s) URL');
-      const img = renderFrames(frames, { scale: +opt.scale || 8, ecc: opt.ecc ?? 'L' });
-      const secs = opt.url ? (opt.intro === undefined ? 5 : +opt.intro) : 0;
-      const intro = secs ? renderIntro(scanUrl(opt.url), Array.from({ length: secs }, (_, i) => secs - i), img.width) : [];
-      const delay = Math.round(100 / (+opt.fps || 10));
-      const gif = encodeGif({ ...img, frames: [...intro, ...img.frames] }, { delay, delays: intro.map(() => 100) });
+      const { gif, img, secs } = makeGif(frames, { url: opt.url, intro: opt.intro === undefined ? 5 : +opt.intro, scale: +opt.scale || 8, fps: +opt.fps || 10, ecc: opt.ecc ?? 'L' });
       await writeFile(opt.gif, gif);
       console.error(`${opt.gif}: ${img.width}x${img.height} px, QR version ${img.version}, ${frames.length} data frames` +
         (secs ? ` after a ${secs} s countdown to ${scanUrl(opt.url)}` : '') + `, ${(gif.length / 1024).toFixed(0)} KiB`);

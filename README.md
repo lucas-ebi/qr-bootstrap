@@ -208,7 +208,10 @@ Options: `--version` (default: the current Unix time), `--block` (bytes per code
 `.github/workflows/deploy.yml` runs the tests and builds the receiver on every push to `main`. The
 build fixes the public keys held in the repository variable `TRUSTED_KEYS`, stamps the core's version,
 and signs the core into `core.bin` with the private key held in the secret `SIGNING_KEY` of the
-environment `signing`. It then publishes the result to GitHub Pages. The build fails if no valid key
+environment `signing`. With the same key it writes looping GIFs of the receiver and of the two
+examples to `gifs/` (for example `https://<owner>.github.io/<repo>/gifs/loader.gif`), each with a
+countdown to the receiver's `#scan` address; the repository variable `LOADER_URL` overrides that
+address. It then publishes the result to GitHub Pages. The build fails if no valid key
 is configured. To build locally:
 
 ```

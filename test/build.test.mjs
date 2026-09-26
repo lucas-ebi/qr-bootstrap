@@ -4,7 +4,10 @@ import { mkdtemp, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FILES, build } from '../tools/build.mjs';
+import { FILES, GIFS, build } from '../tools/build.mjs';
+import { decodeGif } from '../gif.js';
+import { Receiver } from '../fountain.js';
+import { readQr } from './helpers/gif.mjs';
 import { keygen } from '../tools/encode.mjs';
 import { loadKey, open } from '../fountain.js';
 
@@ -50,4 +53,24 @@ test('build refuses to write into the source tree or above it', async () => {
   for (const out of [root, dirname(root.replace(/[\\/]$/, ''))]) {
     await assert.rejects(build({ out, keys: [publicKey] }), /source tree/, out);
   }
+});
+
+test('with a signing key and LOADER_URL, signed GIFs of the loader and the examples are published', async () => {
+  const k = await keygen(), out = await tmp(), url = 'https://example.org/qr/';
+  await build({ out, keys: [k.publicKey], jwk: k.jwk, url, version: 88 });
+  assert.deepEqual((await readdir(join(out, 'gifs'))).sort(), ['loader', ...Object.keys(GIFS)].map(id => id + '.gif').sort());
+  for (const id of ['loader', ...Object.keys(GIFS)]) {
+    const g = decodeGif(new Uint8Array(await readFile(join(out, 'gifs', id + '.gif'))));
+    assert.equal(readQr(g.frames[0], g.width, g.height), url + '#scan', `${id}: countdown`);
+    const rx = new Receiver([await loadKey(k.publicKey)]);
+    let r;
+    for (const px of g.frames) { const t = readQr(px, g.width, g.height); if (t && (r = await rx.push(t))?.opened) break; }
+    assert.deepEqual([r?.opened?.id, r?.opened?.version], [id, 88], id);
+  }
+});
+
+test('LOADER_URL without a signing key, or not http(s), is refused', async () => {
+  const k = await keygen();
+  await assert.rejects(build({ out: await tmp(), keys: [k.publicKey], url: 'https://example.org/' }), /needs a signing key/);
+  await assert.rejects(build({ out: await tmp(), keys: [k.publicKey], jwk: k.jwk, url: 'javascript:alert(1)' }), /http\(s\) URL/);
 });
