@@ -289,13 +289,13 @@ export async function start(boot) {
       (open ? btn('open', key, open) : '') + btn('tx', key, 'TX') + btn('gif', key, 'GIF') + (key !== 'loader' ? btn('del', key, 'DEL') : '') + '</div></div>';
     const loader = `<div class="item">LOADER<br><span class="dim">MJS V${boot.version} ${boot.source === 'stored' ? 'STORED' : 'BUNDLED'}` +
       `${boot.bad.length ? ', FAILED: ' + boot.bad.join(' ') : ''}</span>` +
-      (lc ? `<div class="row">${btn('tx', 'loader', 'TX')}${btn('gif', 'loader', 'GIF')}</div>` : '') + '</div>';
+      '<div class="row">' + (lc ? btn('tx', 'loader', 'TX') + btn('gif', 'loader', 'GIF') : '') +
+      (boot.source === 'stored' || boot.bad.length ? btn('reset', 'loader', 'RESET') : '') + '</div></div>';
     el.innerHTML = `<div class="box"><h2>DIR</h2>` +
-      `<p class="dim">RUN: START · TX: TRANSMIT AS QR STREAM · GIF: SAVE STREAM AS GIF · DEL: DELETE · BUNDLED: SHIPPED WITH THE SITE · STORED: RECEIVED OVER QR · V: SIGNING TIME</p>` + loader +
+      `<p class="dim">RUN: START · TX: TRANSMIT AS QR STREAM · GIF: SAVE STREAM AS GIF · DEL: DELETE · RESET: BACK TO THE BUNDLED LOADER · BUNDLED: SHIPPED WITH THE SITE · STORED: RECEIVED OVER QR · V: SIGNING TIME</p>` + loader +
       apps.map(a => item(a.id, `${a.type} V${a.version} ${kb(a.size)}`, 'app:' + a.id, 'RUN')).join('') +
       files.map(f => item(f.name, `${f.mime} ${kb(f.size)}`, 'file:' + f.id, 'SAVE')).join('') +
       `<p class="dim">${apps.length + files.length + 1} ENTRIES</p><div class="row" style="margin-top:14px"><button data-a="send"><b>S</b>END FILE</button>` +
-      (boot.source === 'stored' || boot.bad.length ? '<button data-a="reset">RESET LOADER</button>' : '') +
       `<button data-a="close">[<b>X</b>] CLOSE</button></div></div>`;
     el.classList.remove('hidden');
     el.onclick = async e => {

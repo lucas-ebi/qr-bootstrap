@@ -181,7 +181,7 @@ await A.click('#app .bar button');
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir = await A.textContent('#lib');
-check('the library lists the loader and the received apps', /MJS V100 BUNDLED/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /TX: TRANSMIT/.test(dir) && !/AMBER|RESET/.test(dir), dir.replace(/\s+/g, ' ').slice(0, 160));
+check('the library lists the loader and the received apps', /MJS V100 BUNDLED/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /TX: TRANSMIT/.test(dir) && !/AMBER/.test(dir) && (await A.locator('#lib button[data-a="reset"]').count()) === 0, dir.replace(/\s+/g, ' ').slice(0, 160));
 await shot(A, 'library');
 await A.click('#lib button[data-a="close"]');
 check('tapping CLOSE closes the library', await A.locator('#lib').isHidden());
@@ -275,13 +275,14 @@ await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir2 = await A.textContent('#lib');
 check('a core that fails to start is marked bad and the built-in one returns', /V100 BUNDLED, FAILED: 300/i.test(dir2), dir2.replace(/\s+/g, ' ').slice(0, 160));
+check('RESET sits in the loader\'s row', (await A.locator('#lib .item').first().locator('button[data-a="reset"]').count()) === 1);
 await A.click('#lib button[data-a="reset"]');
 check('RESET LOADER asks first', /RESET LOADER/.test(await dialog(A)));
 await Promise.all([A.waitForNavigation(), A.keyboard.press('r')]);
 await ready(A);
 await A.click('#b-lib');
 await A.waitForSelector('#lib:not(.hidden)');
-check('and then the stored loader is gone', !/RESET|FAILED/.test(await A.textContent('#lib')));
+check('and then the stored loader is gone', !/FAILED/.test(await A.textContent('#lib')) && (await A.locator('#lib button[data-a="reset"]').count()) === 0);
 await A.click('#lib button[data-a="close"]');
 
 // A new deployment appears on the first reload, not the second
