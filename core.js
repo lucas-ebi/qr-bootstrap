@@ -6,7 +6,6 @@ export const VERSION = 0; // stamped by tools/build.mjs
 
 const CSS = `
 :root { --fg: #33ff66; --dim: #1a9c40; --bg: #050805; --hi: #b6ffc9; }
-:root[data-theme=amber] { --fg: #ffb000; --dim: #a36f00; --bg: #080602; --hi: #ffe2a3; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); }
 body { font: 14px/1.35 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; text-transform: uppercase;
@@ -73,7 +72,6 @@ export async function start(boot) {
   const logEl = document.getElementById('log'), bootLog = logEl?.textContent ?? '';
   document.head.insertAdjacentHTML('beforeend', `<style>${CSS}</style>`);
   document.body.innerHTML = HTML;
-  document.documentElement.dataset.theme = pref('theme') ?? 'green';
   const $ = id => document.getElementById(id);
   const lines = bootLog.split('\n').filter(Boolean);
   const log = s => { lines.push(s); lines.splice(0, lines.length - 40); const el = $('log'); el.textContent = lines.join('\n'); el.scrollTop = el.scrollHeight; };
@@ -284,7 +282,6 @@ export async function start(boot) {
       apps.map(a => item(a.id, `${a.type} V${a.version} ${kb(a.size)}`, 'app:' + a.id, 'RUN')).join('') +
       files.map(f => item(f.name, `${f.mime} ${kb(f.size)}`, 'file:' + f.id, 'SAVE')).join('') +
       `<p class="dim">${apps.length + files.length + 1} ENTRIES</p><div class="row" style="margin-top:14px"><button data-a="send"><b>S</b>END FILE</button>` +
-      `<button data-a="theme">${pref('theme') === 'amber' ? 'GREEN' : 'AMBER'}</button>` +
       (stored || boot.bad.length ? '<button data-a="reset">RESET LOADER</button>' : '') +
       `<button data-a="close">[<b>X</b>] CLOSE</button></div></div>`;
     el.classList.remove('hidden');
@@ -294,7 +291,6 @@ export async function start(boot) {
       const { a, k = '' } = b.dataset, rec = k && k !== 'loader' ? await db.get(k) : null;
       const container = k === 'loader' ? lc : rec?.container, name = k === 'loader' ? 'loader' : k.startsWith('file:') ? rec?.name : rec?.id;
       if (a === 'close') el.classList.add('hidden');
-      else if (a === 'theme') { pref('theme', pref('theme') === 'amber' ? 'green' : 'amber'); document.documentElement.dataset.theme = pref('theme'); library(); }
       else if (a === 'reset') { if (await ask('RESET LOADER?', 'Forget the loader received over QR and start the bundled one.', 'RESET', 'NO')) boot.reset(); }
       else if (a === 'send') $('f-send').click();
       else if (a === 'del') { if (await ask(`DELETE "${name}"?`, 'It is removed from this device.', 'DELETE', 'NO')) { await db.del(k); library(); } }

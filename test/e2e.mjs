@@ -180,7 +180,7 @@ await A.click('#app > button');
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir = await A.textContent('#lib');
-check('the library lists the loader and the received apps', /MJS V100 BUNDLED/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /TX: TRANSMIT/.test(dir) && /AMBER/.test(dir) && !/RESET/.test(dir), dir.replace(/\s+/g, ' ').slice(0, 160));
+check('the library lists the loader and the received apps', /MJS V100 BUNDLED/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /TX: TRANSMIT/.test(dir) && !/AMBER|RESET/.test(dir), dir.replace(/\s+/g, ' ').slice(0, 160));
 await shot(A, 'library');
 await A.click('#lib button[data-a="close"]');
 check('tapping CLOSE closes the library', await A.locator('#lib').isHidden());
@@ -276,9 +276,6 @@ await ready(A);
 await A.click('#b-lib');
 await A.waitForSelector('#lib:not(.hidden)');
 check('and then the stored loader is gone', !/RESET|FAILED/.test(await A.textContent('#lib')));
-await A.click('#lib button[data-a="theme"]');
-check('AMBER switches the colours', await A.evaluate(() => document.documentElement.dataset.theme === 'amber'));
-await A.click('#lib button[data-a="theme"]');
 await A.click('#lib button[data-a="close"]');
 
 // A new deployment appears on the first reload, not the second
