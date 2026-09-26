@@ -323,7 +323,7 @@ export async function start(boot) {
     };
     // Each cycle opens with a film-leader countdown: QR codes of this page's #scan address, which a
     // phone without the loader can open with its camera app before the data frames begin.
-    const COUNT = 5, leader = G.renderIntro(scanUrl, [5, 4, 3, 2, 1], 400);
+    const COUNT = 3, leader = G.renderIntro(scanUrl, [3, 2, 1], 400);
     let t0 = performance.now();
     const info = digit => {
       el.querySelector('.st').textContent = `TX "${name}"  ${kb(container.length)} IN ${enc.n} BLOCKS OF ${kb(enc.b)}\n` +
@@ -384,7 +384,7 @@ export async function start(boot) {
     status(`GIF "${name}": RENDERING ${count} FRAMES`);
     await new Promise(r => setTimeout(r, 30));
     const img = G.renderFrames(Array.from({ length: count }, (_, i) => enc.frame(i + 1)), { scale: 4, ecc: 'L' });
-    const leader = G.renderIntro(scanUrl, [5, 4, 3, 2, 1], img.width); // as on screen: a camera app can open the loader
+    const leader = G.renderIntro(scanUrl, [3, 2, 1], img.width); // as on screen: a camera app can open the loader
     const gif = G.encodeGif({ ...img, frames: [...leader, ...img.frames] }, { delay: Math.round(100 / Math.min(tx.fps, 10)), delays: leader.map(() => 100) });
     status(`GIF "${name}": ${kb(gif.length)}`);
     await save(new File([gif], `${name.replace(/\.[^.]*$/, '') || 'stream'}.gif`, { type: 'image/gif' }));

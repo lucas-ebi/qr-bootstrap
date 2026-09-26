@@ -201,7 +201,7 @@ node tools/encode.mjs sign examples/snake.html --id snake --gif snake.gif --url 
 
 Options: `--version` (default: the current Unix time), `--block` (bytes per code, default 700),
 `--fps` (default 10), `--scale` (pixels per module, default 8), `--ecc` (default L) and `--intro`
-(countdown seconds, 0–9, default 5). Without `--gif`, the command prints one frame per line.
+(countdown seconds, 0–9, default 3). Without `--gif`, the command prints one frame per line.
 
 ### 7.2 Deployment
 

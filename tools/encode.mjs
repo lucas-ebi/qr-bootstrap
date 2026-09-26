@@ -14,7 +14,7 @@
 //
 // `sign` prints one frame per line, or with --gif writes a standalone animated GIF of QR codes: it
 // plays offline in any viewer or browser and can be shared as a file. With --url, each loop starts
-// with --intro seconds (default 5, max 9) of countdown frames: QR codes of that URL with a counter
+// with --intro seconds (default 3, max 9) of countdown frames: QR codes of that URL with a counter
 // in the middle, so a phone's camera app can open the loader before the data frames begin.
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -54,7 +54,7 @@ export async function makeFrames(container, { block = 700, count, start = 1 } = 
 }
 
 // A looping GIF of the frames, preceded by `intro` seconds of countdown to `url` when given.
-export function makeGif(frames, { url, intro = 5, scale = 8, fps = 10, ecc = 'L' } = {}) {
+export function makeGif(frames, { url, intro = 3, scale = 8, fps = 10, ecc = 'L' } = {}) {
   const img = renderFrames(frames, { scale, ecc });
   const secs = url ? intro : 0;
   const lead = secs ? renderIntro(scanUrl(url), Array.from({ length: secs }, (_, i) => secs - i), img.width) : [];
@@ -86,7 +86,7 @@ async function main([cmd, ...argv]) {
       if (opt.intro !== undefined && !opt.url) throw new Error('--intro needs --url <loader URL>');
       if (opt.intro !== undefined && !/^[0-9]$/.test(opt.intro)) throw new Error('--intro must be a whole number of seconds from 0 to 9');
       if (opt.url && !/^https?:\/\/\S+$/.test(opt.url)) throw new Error('--url must be an http(s) URL');
-      const { gif, img, secs } = makeGif(frames, { url: opt.url, intro: opt.intro === undefined ? 5 : +opt.intro, scale: +opt.scale || 8, fps: +opt.fps || 10, ecc: opt.ecc ?? 'L' });
+      const { gif, img, secs } = makeGif(frames, { url: opt.url, intro: opt.intro === undefined ? 3 : +opt.intro, scale: +opt.scale || 8, fps: +opt.fps || 10, ecc: opt.ecc ?? 'L' });
       await writeFile(opt.gif, gif);
       console.error(`${opt.gif}: ${img.width}x${img.height} px, QR version ${img.version}, ${frames.length} data frames` +
         (secs ? ` after a ${secs} s countdown to ${scanUrl(opt.url)}` : '') + `, ${(gif.length / 1024).toFixed(0)} KiB`);
