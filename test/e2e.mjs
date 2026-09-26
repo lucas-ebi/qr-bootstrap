@@ -284,7 +284,14 @@ await ctxA.setOffline(false);
   await P.waitForSelector('#tx:not(.hidden)');
   await P.waitForTimeout(500);
   check('a plain visit shows the loader\'s own stream, without asking for the camera', /TX "LOADER"/i.test(await P.textContent('#tx .st')) && !(await P.evaluate(() => window.__camAsked)));
+  const seen = await P.evaluate(async () => {
+    const bmp = await createImageBitmap(document.querySelector('#codes canvas')), w = window.qrboot.worker;
+    return new Promise(r => { const h = e => { if (e.data.codes) { w.removeEventListener('message', h); r(e.data.codes.map(c => c.text)); } }; w.addEventListener('message', h); w.postMessage({ image: bmp }, [bmp]); });
+  });
+  check('each cycle opens with a countdown to the #scan address', /COUNTDOWN [1-5]/.test(await P.textContent('#tx .st')) && seen[0] === URL_ + '#scan', JSON.stringify(seen));
   await shot(P, 'landing');
+  await P.waitForFunction(() => !/COUNTDOWN/.test(document.querySelector('#tx .st').textContent), null, { timeout: 8000 });
+  check('then the data frames follow', /FPS x 1 CODES/i.test(await P.textContent('#tx .st')));
   await P.click('#tx button[data-k="x"]');
   await P.waitForFunction(() => /CAMERA 1280X720/.test(document.getElementById('log').textContent));
   check('closing it starts the scanner', true);

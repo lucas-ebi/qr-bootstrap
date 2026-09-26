@@ -316,21 +316,34 @@ export async function start(boot) {
       codesEl.innerHTML = '';
       cvs = Array.from({ length: tx.codes }, () => codesEl.appendChild(Object.assign(document.createElement('canvas'), { style: `width:${size}px;height:${size}px` })));
     };
-    const info = () => {
+    // Each cycle opens with a film-leader countdown: QR codes of this page's #scan address, which a
+    // phone without the loader can open with its camera app before the data frames begin.
+    const url = location.href.replace(/#.*$/, '') + '#scan', COUNT = 5, leader = G.renderIntro(url, [5, 4, 3, 2, 1], 400);
+    let t0 = performance.now();
+    const info = digit => {
       el.querySelector('.st').textContent = `TX "${name}"  ${kb(container.length)} IN ${enc.n} BLOCKS OF ${kb(enc.b)}\n` +
-        `${tx.fps} FPS x ${tx.codes} CODES = ${kb(tx.fps * tx.codes * enc.b)}/S  SEED ${seed}`;
+        (digit ? `COUNTDOWN ${digit}: SCAN WITH A CAMERA APP TO OPEN THE LOADER` : `${tx.fps} FPS x ${tx.codes} CODES = ${kb(tx.fps * tx.codes * enc.b)}/S  SEED ${seed}`);
+    };
+    const paint = (c, px, side) => {
+      if (c.width !== side) c.width = c.height = side;
+      const g = c.getContext('2d'), id = g.createImageData(side, side);
+      px.forEach((v, p) => { id.data.fill(v ? 0 : 255, p * 4, p * 4 + 3); id.data[p * 4 + 3] = 255; });
+      g.putImageData(id, 0, 0);
     };
     const draw = t => {
       raf = requestAnimationFrame(draw);
       if (t - last < 1000 / tx.fps - 4) return;
       last = t;
+      const data = Math.max(6, Math.ceil((enc.n * 1.5 + 8) / (tx.codes * tx.fps))); // seconds of data per cycle
+      let at = Math.max(0, (t - t0) / 1000); // the first frame can be stamped just before t0
+      if (at >= COUNT + data) { t0 = t; at = 0; }
+      if (at < COUNT) {
+        const digit = COUNT - Math.floor(at);
+        cvs.forEach(c => paint(c, leader[COUNT - digit], 400));
+        return info(digit);
+      }
       const img = G.renderFrames(cvs.map(() => enc.frame(seed++)), { scale: 1, ecc: 'L' });
-      cvs.forEach((c, i) => {
-        if (c.width !== img.width) c.width = c.height = img.width;
-        const g = c.getContext('2d'), id = g.createImageData(img.width, img.height);
-        img.frames[i].forEach((v, p) => { id.data.fill(v ? 0 : 255, p * 4, p * 4 + 3); id.data[p * 4 + 3] = 255; });
-        g.putImageData(id, 0, 0);
-      });
+      cvs.forEach((c, i) => paint(c, img.frames[i], img.width));
       info();
     };
     const set = async (k, v) => {
