@@ -1,22 +1,36 @@
 # Contributing
 
-Thanks for your interest. This project aims to stay **small, dependency-free and easy to audit**, because it runs code received over the air. Changes that keep it that way are the most welcome.
+The project is kept small, free of runtime dependencies and easy to audit, because it executes code
+received over an unauthenticated channel, and because its own programs must fit through that
+channel. Contributions that preserve these properties are welcome.
 
 ## Setup
 
 Node 20 or newer.
 
 ```bash
-npm test            # unit tests (protocol, signing, build, CLI)
+npm test            # unit tests: protocol, boot, build, command line, GIF, size budgets
 ```
 
-The browser end-to-end test is optional; its header in `test/e2e.mjs` explains how to run it (it needs Playwright and Chromium).
+The browser tests (`test/e2e.mjs`) and the throughput benchmark (`test/bench.mjs`) require
+Playwright and Chromium; their headers explain how to run them.
 
 ## Guidelines
 
-- **No runtime dependencies.** The loader is plain browser JavaScript; `fountain.js` must stay DOM-free so the loader, tools and tests share it. The exceptions are the vendored fallback QR decoder (`vendor/jsQR.js`) and, for the command-line tools only, the vendored QR generator (`tools/vendor/qrcode.mjs`); each has a README with its provenance. Please discuss before adding another.
-- **Protocol changes.** Anything that changes what goes over the wire (frames, the container, the PRNG or `mask`) breaks existing streams. Bump the protocol version, update the regression vector in `test/roundtrip.test.mjs`, and update the README.
-- **Security-sensitive code** (`open`, `Receiver`, payload activation in `index.html`, `tools/build.mjs`, anything in `.github/workflows/`) needs tests that show the bad case is refused, not only that the good case works.
+- **Dependencies.** The receiver is plain browser JavaScript. `fountain.js` and `gif.js` have no DOM
+  access, so that the receiver, the tools and the tests share them. Third-party code is limited to
+  the decoders and the QR generator in `vendor/`, each recorded with its provenance and digest.
+  Please open a discussion before proposing another.
+- **Size budgets.** `test/budget.test.mjs` bounds the compressed size of each program. Raising a
+  budget requires a justification.
+- **Protocol changes.** Any change to what is transmitted (frames, containers, the PRNG or the masks)
+  must be made in the parameter block of `docs/PROTOCOL.md`. This yields a new protocol identifier,
+  which must be recorded as `PROTOCOL` in `fountain.js`, together with the test vectors.
+- **Boot and core.** `boot.js` should change rarely, since installed receivers can replace their core
+  over the optical channel but not their boot program.
+- **Security-sensitive code** (`open`, `Receiver`, `boot.js`, the policy and activation code in
+  `core.js`, `tools/build.mjs`, `.github/workflows/`) requires tests that demonstrate the refusal of
+  the adverse case, not only the acceptance of the intended one.
 - **Keys.** Never commit private keys or `signing-key.json` (it is gitignored). Public keys are configured through the `TRUSTED_KEYS` variable, not in the source.
 - **Match the surrounding style,** keep comments short, and explain why rather than what.
 

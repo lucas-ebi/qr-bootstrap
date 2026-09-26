@@ -1,163 +1,272 @@
 # QR Bootstrap
 
-A tiny offline PWA that receives **signed** software over an animated QR stream and runs it. No network, no install step beyond the page itself.
+## Abstract
 
-- **Loss-tolerant:** a fountain code, so frames can be missed and scanned in any order.
-- **Authenticated:** payloads carry an Ed25519 signature and only run if signed by a key pinned in the loader.
-- **Compact:** payloads are deflate-compressed and framed in base45, which QR codes store in their dense alphanumeric mode.
+QR Bootstrap transfers programs and files between devices through sequences of QR codes shown on
+one screen and captured by another device's camera. It requires no network, pairing or radio. Data
+is protected against loss by a rateless erasure code, so the receiver may miss any subset of frames
+and join a transmission at any point. Programs carry Ed25519 signatures and run only when signed by
+a key fixed in the receiver. The receiver is a web application of about 21 KB (compressed, excluding the vendored QR decoders), divided
+into a fixed boot program and a replaceable core. A newer core can therefore be delivered through the
+same optical channel it implements, and every receiver can retransmit what it holds, the receiver
+itself included. The intended use is the distribution of software and documents where networks are
+unavailable, as after a disaster, starting from devices on which the receiver has been installed
+beforehand.
 
-## Quick start
+## 1. Motivation and scope
 
-Needs Node 20+ for the tools, and a recent browser with camera access and Ed25519 WebCrypto (Chrome, Edge, Firefox or Safari) for the loader.
+The screen–camera channel is almost universally available, one-way and short-range, and its
+bandwidth is modest. Modest is relative: one version-40 QR code holds 2,953 bytes, about three times
+the memory of a Sinclair ZX81. The design follows from three constraints.
 
-```bash
-# 1. Make a signing key. The private key stays in signing-key.json (gitignored).
-node tools/encode.mjs keygen
+- The channel has no return path, so the sender cannot learn which frames were lost.
+- Receivers are ordinary telephones with ordinary cameras.
+- Whatever runs on the receiver must be small enough to travel over the channel itself.
 
-# 2. Build the loader with your public key pinned, and serve it (camera access needs localhost or HTTPS)
-TRUSTED_KEYS="<the printed public key>" npm run build && npx serve dist
+A stock camera application does not execute code found in a QR code, and browsers refuse top-level
+navigation to `data:` URLs. First contact therefore requires one installation of the receiver, from
+the web or otherwise. Every subsequent transfer, including upgrades of the receiver, uses the optical
+channel alone. Removing the initial installation would require support from the operating system;
+it is outside the scope of this work.
 
-# 3. Turn the example game into a standalone animated GIF of QR codes
-node tools/encode.mjs sign examples/snake.html --id snake --gif snake.gif \
-  --url https://<you>.github.io/<repo>/
-```
-
-Show `snake.gif` on any screen (any image viewer or browser plays it, offline) and point the loader's camera at it. The HUD shows progress, then the game starts. On a phone, host the loader on any static HTTPS site (a phone cannot reach your `localhost`).
-
-**The GIF is a standalone file.** It needs no player, network or browser, so it can be shared like any image. Each loop starts with a 5-second countdown (`--intro`, 0 to 9): QR codes that point at the loader `--url`, with a film-leader style counter in the middle. Scan one with the phone's normal camera app to open the loader, then point the loader at the data frames that follow. Without `--url` there is no countdown. Other options: `--scale` (pixels per QR module, default 8), `--fps` (data frames per second, default 6) and `--ecc` (L, M, Q or H).
-
-Sharing tips: send the GIF as a file or attachment. Messaging apps that "optimize" GIFs (they often convert them to video and blur them) can make the codes unreadable. The receiver only needs about as many frames as the payload has blocks (plus one or two), in any order, so missing part of a loop is fine; keep the camera pointed at it across loops.
-
-`sign` without `--gif` prints one frame per line, so you can feed any other QR renderer. To ship an update, sign the new build again (the version defaults to the current time, or pass `--version N`). The first run of each app asks for your approval.
-
-## How it works
-
-1. **Seal.** `sig(64 B) || deflate-raw("<type> <id> <version>\n" + payload)`. The Ed25519 signature covers `"QB1-payload\0" || <the compressed part>`, so it cannot be replayed in another protocol. `version` defaults to the current Unix time.
-2. **Split** the container into `n` blocks of `b = ceil(len / n)` bytes.
-3. **Encode.** Each symbol is the XOR of a random subset of the blocks. The subset is fully determined by a 32-bit seed: block `j` is included iff bit `j` of the Mulberry32 output stream is set (a fresh 32-bit word every 32 blocks).
-4. **Decode.** The loader runs incremental Gaussian elimination over GF(2). Any `n` linearly independent symbols recover the container. In practice `n + 1` to `n + 2` symbols are enough (measured by `npm test`: about 1.2 to 2.1 extra symbols for `n` = 8 to 150).
-5. **Verify, then run.** The stream ID must match the SHA-256 prefix of the container and the signature must verify against a pinned key. Only then is the payload decompressed. The loader then refuses versions older than the newest it has run, asks you to confirm the first run of each app (see below), and activates it.
-
-### Frame format
+## 2. System model
 
 ```
-QB1/<streamId>/<n>/<len>/<seed>/<data>
+  sender screen                                       receiver camera
+ ┌──────────────┐   QR frames, one-way, lossy        ┌────────────────────────────────┐
+ │ loader (TX)  │ ─────────────────────────────────► │ decode worker (zxing-wasm)     │
+ │ or a GIF file│                                    │   → Receiver (erasure decoder) │
+ └──────────────┘                                    │   → policy: signature, version,│
+                                                     │     approval → run or keep     │
+                                                     └────────────────────────────────┘
 ```
 
-| Field | Meaning |
-|-------|---------|
-| `QB1` | Protocol version |
-| `streamId` | First 8 bytes of SHA-256(container), uppercase hex |
-| `n` | Block count (1 to 256) |
-| `len` | Container length in bytes (65 to 262144) |
-| `seed` | Symbol seed (uint32) |
-| `data` | One symbol (`b` bytes), base45 (RFC 9285) |
+A *container* is a byte string of at most 4 MiB. It is split into n blocks, and the sender emits
+an unbounded sequence of symbols, each the XOR of a pseudo-random subset of blocks selected by a
+32-bit seed. Every symbol is written as one frame in the QR alphanumeric alphabet (base45) and
+shown as one QR code. The receiver solves the resulting linear system over GF(2) incrementally, and
+reconstructs the container from any n linearly independent symbols. With uniformly drawn subsets
+this takes n + 2 symbols on average; `npm test` measures 1.3 to 1.9 extra symbols for n between 8
+and 150. The normative definition of frames, containers and the protocol identifier is in
+[docs/PROTOCOL.md](docs/PROTOCOL.md).
 
-Every character is in the QR alphanumeric set, so encoders should use alphanumeric mode (`tools/encode.mjs --gif` does). Frames are self-describing; the loader may also receive one via the page URL hash (`https://host/#QB1/...`).
+Containers are of two kinds. A *code* container holds a program (an ES module, an HTML document
+or JSON), compressed and signed. A *file* container holds arbitrary data with a name and a media
+type, compressed when that helps, and unsigned, since telephones create files but hold no signing
+key.
 
-### Payload types
+Transmissions take two forms. The receiver itself shows an endless stream of codes starting from
+a random seed, so two senders showing the same container simultaneously contribute distinct
+symbols. Alternatively, `tools/encode.mjs` or the receiver writes a looping GIF, which any image
+viewer can display without the receiver. A GIF may begin with a countdown of QR codes that link to
+the receiver's address with the fragment `#scan`, so that a telephone's camera application can open
+the receiver before the data frames begin. On a telephone with a single device, a saved GIF or a
+screen recording can be opened as a file and decoded without a camera.
 
-| Type | Behavior |
-|------|----------|
-| `mjs` | Imported as an ES module; its `init({ id, modules, log, startScanner, stopScanner })` is called |
-| `html` | Runs in a fullscreen sandboxed iframe (scripts only, opaque origin) with a close button |
-| `json` | Parsed and stored in `window.qrboot.modules` |
+## 3. The receiver
 
-## Trust model
+### 3.1 Boot and core
 
-- **Signed only.** Payloads run only if signed by a key in `TRUSTED_KEYS`, which is pinned into the page at build time (see Deploying). Frames from anyone else are rejected after decoding.
-- **No replay.** Each payload carries a version. The loader remembers the newest one it ran per app id and rejects older ones ("older version"). This state lives in the browser's `localStorage`, so clearing site data (or private browsing) resets it.
-- **You approve first runs.** The first time an app id arrives from a given signer, the loader shows its name, version and the signer's key fingerprint and waits for you. Later versions from the same signer run without asking; the same id from a different signer asks again.
-- **HTML apps are sandboxed.** They get an opaque origin: no access to the loader's storage, cache or service worker, or to other sites on the same host.
-- **`mjs` modules are not sandboxed.** They run in the loader's page so they can extend it (`init({ id, modules, log, startScanner, stopScanner })`). A signed module has the loader's full privileges, for example it could rewrite the service-worker cache. Sign only code you trust.
-- The loader is only as trustworthy as where it is hosted, since that is where the pinned key lives.
+The receiver consists of two programs. `boot.js` (1.6 KB compressed) holds the trusted public keys
+and a key-value store in IndexedDB. On each start it selects a core: either the one shipped with the
+installation or the newest stored core whose signature verifies, whichever version is higher, unless
+that version has been marked as failed. `core.js` (about 10 KB compressed) implements everything else:
+the interface, scanning, the transmission view, the library and file handling. It even supplies its
+own style sheet, so a newer core can change any aspect of the receiver except the set of trusted
+keys.
 
-## Hardening the deployment
+A core arrives as a code container with the reserved id `loader`. It is verified, stored, and takes
+effect at the next start. Before starting a stored core, the boot program records it as pending, and
+clears that mark once `start()` has completed. A core that throws is marked as failed at once. One
+that never completes is marked as failed at the next launch. In both cases the next candidate
+starts, and the bundled core is always available as a last resort. Section 6 of the specification
+gives the state diagram.
 
-- Serve from your own domain rather than a shared `*.github.io` origin, so nothing else shares the loader's origin.
-- Protect `main` (required review, no force-push) and turn on 2FA for the repo: whoever can change the code, the workflow or the `TRUSTED_KEYS` variable can change who is trusted.
-- Keep `signing-key.json` out of the repo and off shared machines, or store it in a password manager.
-- **Rotating a key:** add the new public key to the `TRUSTED_KEYS` variable and redeploy, start signing with the new key, then remove the old key from the variable and redeploy again. Installed copies update on their next load after a deploy, so keep the overlap long enough for them to pick it up.
+### 3.2 Decoding
 
-## Deploying to GitHub Pages
+Decoding runs in a dedicated worker so that the camera loop is never blocked. The worker uses the
+browser's `BarcodeDetector` where one exists. Otherwise it uses zxing-wasm, a WebAssembly build of
+zxing-cpp, which finds several codes in one image in a few milliseconds. jsQR is the last resort.
+The erasure decoder packs coefficients into 32-bit words. Decoding costs O(n²·b/32) word operations,
+spread across the reception. For the largest admissible container (3,496 blocks), encoding and
+decoding together take about 10 s on a desktop computer.
 
-`.github/workflows/deploy.yml` publishes the loader on every push to `main`. It runs the tests, pins your public key into the page, and publishes only the loader files (`tools/`, `test/` and `examples/` are not deployed). One-time setup in the repo's Settings:
+### 3.3 Landing
 
-1. **Pages → Build and deployment → Source:** GitHub Actions.
-2. **Secrets and variables → Actions → Variables → New repository variable** named `TRUSTED_KEYS`, containing the public key(s) printed by `keygen`, comma-separated. It is a variable rather than a secret because public keys are not confidential.
+A visit to the receiver's address shows the receiver's own signed stream (`core.bin`), so that a
+device holding an older receiver can obtain the current one from any screen that displays the site.
+The camera is not requested until the user closes this view. The address with the fragment `#scan`,
+used by GIF countdowns and as the start address of the installed application, opens the scanner
+directly.
 
-The build fails, rather than deploying a loader that trusts nothing, if the variable is missing or malformed. To build the same artifact locally:
+### 3.4 Presentation
 
-```bash
-TRUSTED_KEYS="<public key>" npm run build && npx serve dist
+The interface imitates a phosphor terminal: green (or amber) monospaced text, a boot log in place
+of progress indicators, a directory listing for stored items, and dialogs answered with keys.
+The QR codes themselves are always drawn black on white, as reliable decoding requires. Every
+program and module is subject to a size budget (`test/budget.test.mjs`), measured after compression
+because that is the form in which it crosses the channel.
+
+## 4. Security
+
+**Assets and adversary.** The adversary may display arbitrary frames to the receiver, replay any
+frame or container ever transmitted, and interleave several streams. The adversary does not hold a
+trusted private key, and cannot modify the hosted receiver or its deployment pipeline.
+
+**Guarantees.**
+
+1. **Code must be signed.** Code runs only if its Ed25519 signature verifies under a key fixed in
+   `boot.js` at build time. The signature covers a domain prefix and the compressed body, and is
+   checked before decompression.
+2. **No replay or rollback.** For each id, the receiver refuses versions older than the newest it
+   has accepted.
+3. **Approval of new signers.** The first container of an id, or of an id from a different signer,
+   requires the user's explicit approval.
+4. **Sandboxed HTML.** HTML programs run in a sandboxed frame with an opaque origin, without access
+   to the receiver's storage, cache or keys.
+5. **Files are never executed or rendered as active content.** Images, audio and video are
+   previewed in media elements; everything else can only be saved.
+6. **Bounded frames.** Frames are validated against fixed bounds before any allocation proportional
+   to their declared size.
+7. **Trust stays in the boot program.** A core cannot alter the trusted keys, which live in
+   `boot.js`.
+
+**Non-guarantees.**
+
+- ES modules (`mjs`) run with the receiver's privileges, by design, so that they can extend it.
+- Files are authenticated by nothing but their stream identifier, which protects against
+  transmission errors only.
+- Replay protection is local state: clearing the site's data resets it.
+- The receiver is as trustworthy as its hosting, where the keys are fixed. A shared origin such as
+  `*.github.io` places other sites on the same host, and a dedicated domain is preferable.
+- Key rotation currently requires a web deployment.
+
+Vulnerabilities should be reported as described in [SECURITY.md](SECURITY.md).
+
+## 5. Performance
+
+Throughput is the product of the bytes per code, the codes per displayed image and the displayed
+images per second, less the codes the receiver fails to decode. QR error correction duplicates the
+function of the erasure code, so data frames use level L.
+
+`test/bench.mjs` simulates a telephone camera filming a telephone screen in portrait orientation.
+The screen fills 70 % of the height of a 1920 × 1080 image, with a Gaussian blur of 0.8 pixels,
+reduced contrast and additive noise. The camera takes 30 images per second through a rolling
+shutter with a 25 ms readout. The receiver decodes with zxing-wasm, with decoding times multiplied
+by three to approximate a telephone's processor. Each configuration ran for 3 s of simulated time.
+
+| Bytes per code | QR version | Codes per image | Images per second | Codes received per second | KB/s |
+|---:|---:|---:|---:|---:|---:|
+| 698 | 19 | 1 | 8 | 8.3 | 5.7 |
+| 698 | 19 | 1 | 12 | 11.3 | 7.7 |
+| 698 | 19 | 1 | 20 | 14.7 | 10.0 |
+| 698 | 19 | 2 | 8–20 | 0 | 0 |
+| 1,200 | 25 | 1–2 | 8–20 | 0 | 0 |
+| 2,000 | 34 | 1–2 | 8–20 | 0 | 0 |
+
+In this geometry the limiting factor is spatial rather than temporal resolution. Codes above
+version 19, or two codes on one telephone screen, leave fewer than about three camera pixels per
+module and are not decoded. The defaults are therefore one code of 700 bytes per image at 15 images
+per second, which gives roughly 8–10 KB/s (a 300 KB photograph in about 35 s). This rate is eight
+times that of the previous version of the receiver.
+
+Larger codes and several codes per image become useful when the sending screen is larger or
+closer; the transmission view lets the user change both. The simulation omits motion, focus and
+moiré, so it is likely optimistic, and it has not yet been validated against measurements on
+physical telephones.
+
+## 6. Limitations
+
+- **First contact** requires one installation of the receiver (Section 1).
+- **Colour.** Multiplexing codes in colour channels could roughly triple capacity. It was not
+  pursued, because channel separation between a screen and a camera depends on the display and on
+  white balance, and failures would be total rather than gradual.
+- **No return path.** The rate cannot adapt to the receiver: the sender chooses it manually.
+- **Tested platforms.** The automated tests use Chromium. Safari on iOS, the principal target, has
+  so far been tested only manually and only with the previous version of the receiver.
+- **Size.** Containers are limited to 4 MiB, and at the rates above such a container takes minutes
+  to transfer.
+
+## 7. Operation
+
+### 7.1 Tools
+
+Node 20 or newer is required. `node tools/encode.mjs keygen` creates a key pair and writes the
+private key to `signing-key.json`, which is ignored by git. The following command signs a program and
+writes a looping GIF whose countdown leads to the receiver:
+
+```
+node tools/encode.mjs sign examples/snake.html --id snake --gif snake.gif --url https://<host>/<path>/
 ```
 
-## Signing in CI (keep the private key off your laptop)
+Options: `--version` (default: the current Unix time), `--block` (bytes per code, default 700),
+`--fps` (default 10), `--scale` (pixels per module, default 8), `--ecc` (default L) and `--intro`
+(countdown seconds, 0–9, default 5). Without `--gif`, the command prints one frame per line.
 
-Signing works locally (`tools/encode.mjs`), but the private key can instead live only in a GitHub secret, with `.github/workflows/sign.yml` doing the signing. Then you can sign from any device that can run a workflow.
+### 7.2 Deployment
 
-One-time setup (replace `OWNER/REPO`, or run inside a clone):
+`.github/workflows/deploy.yml` runs the tests and builds the receiver on every push to `main`. The
+build fixes the public keys held in the repository variable `TRUSTED_KEYS`, stamps the core's version,
+and signs the core into `core.bin` with the private key held in the secret `SIGNING_KEY` of the
+environment `signing`. It then publishes the result to GitHub Pages. The build fails if no valid key
+is configured. To build locally:
 
-```bash
-# 1. An environment to hold the key. (Settings -> Environments: you can also require reviewers
-#    and restrict it to the main branch, if your plan allows.)
+```
+TRUSTED_KEYS=<public key> npm run build && npx serve dist
+```
+
+Without a signing key the local build omits `core.bin`; the receiver then cannot transmit itself, and
+opens on the scanner.
+
+### 7.3 Signing without a local key
+
+The private key can exist solely as a GitHub secret, generated directly into it:
+
+```
 gh api -X PUT repos/OWNER/REPO/environments/signing
-
-# 2. Generate the key straight into the secret. It goes through a pipe and never touches disk.
-#    The public key is printed to your terminal.
 node tools/encode.mjs keygen - | gh secret set SIGNING_KEY --env signing -R OWNER/REPO
-
-# 3. Set that public key as the TRUSTED_KEYS variable (see Deploying) and deploy.
 gh variable set TRUSTED_KEYS -R OWNER/REPO --body "<the printed public key>"
 ```
 
-To sign: **Actions → Sign payload → Run workflow**, giving the payload's path in the repo, an app id and optionally a version. Or:
+`.github/workflows/sign.yml` then signs any file in the repository and produces a GIF:
 
-```bash
+```
 gh workflow run sign.yml -f file=examples/snake.html -f id=snake
-gh run watch && gh run download        # fetches qr-snake/snake.gif
 ```
 
-Good to know:
-- The payload must be committed to the repo, because the workflow runs on GitHub.
-- A secret cannot be read back. If it is ever lost, generate a new key and rotate (see Hardening).
-- Anyone who can edit workflows on a branch that can use the `signing` environment can make it sign, or read the key. Protect `main`, and limit the environment to `main` (and require reviewers) where your plan allows.
+Anyone able to run workflows on a branch permitted to use the `signing` environment can cause
+signatures to be made. The environment should therefore be restricted to `main`, and `main` should
+be protected.
 
-## Limits and support
+### 7.4 Key rotation
 
-- **Browsers:** any recent browser with camera access and Ed25519 in WebCrypto. QR decoding uses the browser's built-in `BarcodeDetector` where it exists (Chrome on Android, macOS and ChromeOS) and the bundled jsQR fallback everywhere else (Chrome on desktop Linux and Windows, Firefox, Safari, iOS). The fallback is slower and reads one code per frame. So far it has only been tested with Chromium on Linux; real phone cameras, Safari and iOS have not been tested.
-- Streams are capped at 256 blocks, 256 KiB and 1500 B per block; anything beyond that is rejected before allocation.
-- Updates: the service worker is stale-while-revalidate, so an installed copy updates on the next load after it.
+Add the new public key to `TRUSTED_KEYS` and deploy. Sign with the new key. Once installed receivers
+have updated, remove the old key and deploy again.
 
-## Files
+## 8. Repository
 
-| Path | Purpose |
-|------|---------|
-| `index.html` | Loader UI: camera, scanner, HUD, payload activation |
-| `vendor/` | jsQR (Apache-2.0), the fallback QR decoder for browsers without `BarcodeDetector` |
-| `fountain.js` | Protocol core (base45, frames, decoder, container, receiver). No DOM, shared with the tools and tests |
-| `tools/encode.mjs` | `keygen` and `sign`: signs a file and emits frames or a standalone QR GIF |
-| `tools/gif.mjs` | QR frames to an animated GIF, with the countdown intro (dependency-free GIF encoder) |
-| `tools/vendor/` | qrcode-generator (MIT), used only by the tools to draw QR codes |
-| `tools/build.mjs` | Assembles the deployable loader in `dist/` with `TRUSTED_KEYS` pinned (`npm run build`) |
-| `.github/workflows/deploy.yml` | Tests, builds and publishes the loader to GitHub Pages |
-| `.github/workflows/sign.yml` | Signs a payload with the key stored in GitHub and outputs a QR GIF |
-| `examples/snake.html`, `examples/tetris.html` | Example payloads: two single-file games with touch controls (about 2 and 3 KB once signed and compressed) |
-| `test/roundtrip.test.mjs` | Unit tests: `npm test` |
-| `test/tetris.test.mjs` | Runs the Tetris game's logic in Node with a stubbed DOM (`npm test`) |
-| `test/e2e.mjs` | Browser test with fake camera, using the games as payloads (optional, see its header) |
-| `sw.js`, `manifest.json` | Offline support and PWA metadata |
+| Path | Content |
+|---|---|
+| `docs/PROTOCOL.md` | Normative specification; its parameter block defines the protocol identifier |
+| `fountain.js` | Protocol core: frames, erasure code, containers, receiver (no DOM) |
+| `boot.js`, `core.js`, `index.html` | The receiver: fixed boot program, replaceable core, minimal page |
+| `decode-worker.js` | QR detection and erasure decoding off the main thread |
+| `gif.js` | QR rendering, GIF encoding with countdown, GIF decoding |
+| `sw.js`, `manifest.json` | Offline operation and installation |
+| `tools/encode.mjs`, `tools/build.mjs` | Key generation and signing; assembly of the deployable receiver |
+| `examples/` | Two programs used as payloads: Snake and Tetris |
+| `test/` | Unit tests (`npm test`), budgets, browser tests (`test/e2e.mjs`) and the benchmark (`test/bench.mjs`) |
+| `vendor/` | Third-party code with provenance and digests |
 
-## Third-party
+## 9. Third-party components
 
-The loader bundles one third-party file, `vendor/jsQR.js` ([jsQR](https://github.com/cozmo/jsQR) 1.4.0, Apache-2.0, license in `vendor/jsQR.LICENSE`, provenance in [vendor/README.md](vendor/README.md)). It is loaded only when the browser has no built-in `BarcodeDetector`. There are no other runtime dependencies. The command-line tools (not the deployed loader) vendor [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) 2.0.4 (MIT, in `tools/vendor/`, with its license and provenance) to draw the QR codes; the GIF encoder is our own.
+The receiver includes zxing-wasm 3.1.4 (MIT), which contains zxing-cpp (Apache-2.0); jsQR 1.4.0
+(Apache-2.0); and qrcode-generator 2.0.4 (MIT). Provenance, digests and licence texts are in
+[vendor/](vendor/README.md). The application icons were produced with an image-generation tool.
+Such images may not be eligible for copyright, and the MIT licence applies to them only to the
+extent that they are.
 
-The app icons (`icon-192.png`, `icon-512.png`) were generated with an AI image tool. Such images may not be eligible for copyright, so the MIT license applies to them only to the extent that they are; feel free to replace them.
+## Licence
 
-## Contributing and security
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
-
-## License
-
-[MIT](LICENSE)
+[MIT](LICENSE). Contributions are governed by [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md).

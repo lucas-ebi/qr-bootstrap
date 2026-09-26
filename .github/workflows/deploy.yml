@@ -6,6 +6,8 @@ name: Deploy
 #   2. Secrets and variables -> Actions -> Variables -> TRUSTED_KEYS:
 #      comma-separated base64url public keys printed by `node tools/encode.mjs keygen`
 #      (public keys, so a variable rather than a secret)
+#   3. The SIGNING_KEY secret of the `signing` environment (see sign.yml). The build signs the core
+#      with it into core.bin, which lets installed loaders pass their own program on over QR.
 
 on:
   push:
@@ -22,16 +24,20 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: signing
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm test
-      - name: Build (pins TRUSTED_KEYS, copies only the loader files)
+      - name: Build (pins TRUSTED_KEYS, signs the core, copies only the loader files)
         run: node tools/build.mjs dist
         env:
           TRUSTED_KEYS: ${{ vars.TRUSTED_KEYS }}
+          QR_BOOTSTRAP_SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
