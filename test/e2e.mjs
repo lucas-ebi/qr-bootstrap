@@ -8,6 +8,7 @@ import http from 'node:http';
 import { mkdir, readFile } from 'node:fs/promises';
 import { keygen, makeFrames, seal } from '../tools/encode.mjs';
 import { decodeGif, encodeGif, renderFrames } from '../gif.js';
+import { readQr } from './helpers/gif.mjs';
 
 const { chromium } = await import('playwright').catch(() => {
   console.error('playwright is not installed: npm i --no-save playwright && npx playwright install chromium');
@@ -156,6 +157,7 @@ const probe = await game.evaluate(() => {
   const attempt = f => { try { f(); return 'accessible'; } catch (e) { return e.name; } };
   return { origin: window.origin, parent: attempt(() => parent.document.title), storage: attempt(() => localStorage.length) };
 });
+check('no scanlines over a running app', await A.locator('#lines').isHidden());
 check('HTML runs sandboxed: opaque origin, no access to the loader', probe.origin === 'null' && probe.parent === 'SecurityError' && probe.storage === 'SecurityError', JSON.stringify(probe));
 const snakeCells = f => f.evaluate(() => {
   const g = document.getElementById('c').getContext('2d'), out = [];
@@ -178,8 +180,12 @@ await A.click('#app > button');
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir = await A.textContent('#lib');
-check('the library lists the loader and the received apps', /LOADER/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /V100/.test(dir), dir.replace(/\s+/g, ' ').slice(0, 160));
+check('the library lists the loader and the received apps', /BUILT IN · VERSION 100/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /SHOW QR/.test(dir) && !/AMBER|UNDO/.test(dir), dir.replace(/\s+/g, ' ').slice(0, 160));
 await shot(A, 'library');
+await A.click('#lib button[data-a="close"]');
+check('tapping CLOSE closes the library', await A.locator('#lib').isHidden());
+await A.click('#b-lib');
+await A.waitForSelector('#lib:not(.hidden)');
 
 const { page: B } = await open({ viewport: { width: 1000, height: 760 } });
 // Copies what A shows on screen onto B's camera until B reacts.
@@ -262,8 +268,15 @@ await ready(A);
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir2 = await A.textContent('#lib');
-check('a core that fails to start is marked bad and the bundled one returns', /V100 BUNDLED, FAILED: 300/i.test(dir2), dir2.replace(/\s+/g, ' ').slice(0, 120));
-await A.keyboard.press('x');
+check('a core that fails to start is marked bad and the built-in one returns', /BUILT IN · VERSION 100 · A NEWER UPDATE FAILED/i.test(dir2), dir2.replace(/\s+/g, ' ').slice(0, 160));
+await A.click('#lib button[data-a="reset"]');
+check('UNDO LOADER UPDATE asks first', /UNDO LOADER UPDATE/.test(await dialog(A)));
+await Promise.all([A.waitForNavigation(), A.keyboard.press('u')]);
+await ready(A);
+await A.click('#b-lib');
+await A.waitForSelector('#lib:not(.hidden)');
+check('and then the stored loader is gone', !/UNDO|FAILED/.test(await A.textContent('#lib')));
+await A.click('#lib button[data-a="close"]');
 
 // Offline: the service worker serves everything, and stored apps still run
 await ctxA.setOffline(true);
@@ -288,13 +301,21 @@ await ctxA.setOffline(false);
     const bmp = await createImageBitmap(document.querySelector('#codes canvas')), w = window.qrboot.worker;
     return new Promise(r => { const h = e => { if (e.data.codes) { w.removeEventListener('message', h); r(e.data.codes.map(c => c.text)); } }; w.addEventListener('message', h); w.postMessage({ image: bmp }, [bmp]); });
   });
-  check('each cycle opens with a countdown to the #scan address', /COUNTDOWN [1-5]/.test(await P.textContent('#tx .st')) && seen[0] === URL_ + '#scan', JSON.stringify(seen));
+  check('each cycle opens with a countdown to the #scan address', /COUNTDOWN [1-3]/.test(await P.textContent('#tx .st')) && seen[0] === URL_ + '#scan', JSON.stringify(seen));
   await shot(P, 'landing');
   await P.waitForFunction(() => !/COUNTDOWN/.test(document.querySelector('#tx .st').textContent), null, { timeout: 8000 });
-  check('then the data frames follow', /FPS x 1 CODES/i.test(await P.textContent('#tx .st')));
+  check('then the data frames follow', /FRAMES\/S · 1 CODE ON SCREEN/i.test(await P.textContent('#tx .st')));
   await P.click('#tx button[data-k="x"]');
   await P.waitForFunction(() => /CAMERA 1280X720/.test(document.getElementById('log').textContent));
   check('closing it starts the scanner', true);
+  await P.evaluate(fs => fs.forEach(text => window.qrboot.worker.postMessage({ text })), snake.frames.slice(0, 2));
+  await P.waitForFunction(() => /% \[/.test(document.getElementById('status').textContent));
+  const fit = await P.evaluate(() => {
+    const st = document.getElementById('status'), term = document.getElementById('term');
+    return { status: st.scrollWidth <= st.clientWidth, panel: term.getBoundingClientRect().height / innerHeight };
+  });
+  check('phone: the progress line is not cut off, and the panel leaves most of the screen to the camera', fit.status && fit.panel < 0.4, JSON.stringify(fit));
+  await shot(P, 'scanning-phone');
   await ctx.close();
 }
 
@@ -354,6 +375,7 @@ await dialog(C);
 const [download] = await Promise.all([C.waitForEvent('download', { timeout: 30000 }), C.click('#dlg button[data-v="1"]')]);
 const g = decodeGif(new Uint8Array(await readFile(await download.path())));
 check('phone: GIF export produces a readable GIF', g.frames.length > 10, `${g.frames.length} frames, ${g.width} px`);
+check('phone: the saved GIF opens with a 3-second countdown to #scan', [0, 1, 2].every(i => readQr(g.frames[i], g.width, g.height) === URL_ + '#scan') && readQr(g.frames[3], g.width, g.height) !== URL_ + '#scan');
 
 check('no page errors', errors.length === 0, errors.join(' | '));
 await browser.close();

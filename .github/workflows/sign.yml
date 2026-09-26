@@ -32,7 +32,7 @@ on:
       intro:
         description: 'Seconds of countdown to the loader URL at the start of each loop (0 to disable, max 9)'
         required: false
-        default: '5'
+        default: '3'
 
 permissions:
   contents: read

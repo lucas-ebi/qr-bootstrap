@@ -4,7 +4,7 @@
 <style>
   /* Phosphor terminal, like the loader. */
   :root { --h: min(88vh, (100vw - 140px) * 2); }
-  @media (pointer: coarse) { :root { --h: min(66vh, (100vw - 140px) * 2); } }
+  @media (pointer: coarse) { :root { --h: min(62vh, (100vw - 140px) * 2); } }
   html, body {
     margin: 0; height: 100%; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
     background: #050805; color: #33ff66; text-transform: uppercase; text-shadow: 0 0 4px #33ff6699;
@@ -18,13 +18,21 @@
   #side b { color: #b6ffc9; font-weight: normal; }
   #next { width: 100px; height: 100px; margin-bottom: 6px; }
   #hint { font-size: 12px; line-height: 1.3; }
-  #pad { display: none; gap: 8px; }
+  /* Game Boy layout: a cross on the left, two round buttons on the right. */
+  #pad { display: none; width: min(100%, 400px); padding: 0 16px; box-sizing: border-box; justify-content: space-between; align-items: center; }
   @media (pointer: coarse) { #pad { display: flex; } }
   #pad button {
-    width: 56px; height: 56px; font: inherit; font-size: 22px; color: #33ff66; background: #050805; touch-action: none;
-    border: 2px solid #33ff66;
+    font: inherit; color: #33ff66; background: #050805; touch-action: none; border: 2px solid #33ff66; padding: 0;
   }
   #pad button:active { background: #33ff66; color: #050805; }
+  #cross { display: grid; grid-template: repeat(3, 52px) / repeat(3, 52px); gap: 2px; }
+  #cross button { font-size: 24px; }
+  #cross [data-a=rotate] { grid-area: 1 / 2; } #cross [data-a=left] { grid-area: 2 / 1; }
+  #cross [data-a=right] { grid-area: 2 / 3; } #cross [data-a=down] { grid-area: 3 / 2; }
+  #ab { display: flex; gap: 18px; align-items: flex-start; }
+  #ab div { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; }
+  #ab div:first-child { margin-top: 34px; }
+  #ab button { width: 72px; height: 72px; border-radius: 50%; font-size: 28px; }
 </style>
 <div id="main">
   <canvas id="board" width="300" height="600"></canvas>
@@ -37,11 +45,16 @@
   </div>
 </div>
 <div id="pad">
-  <button data-a="left" aria-label="Left">◀</button>
-  <button data-a="down" aria-label="Down">▼</button>
-  <button data-a="right" aria-label="Right">▶</button>
-  <button data-a="rotate" aria-label="Rotate">⟳</button>
-  <button data-a="drop" aria-label="Drop">⤓</button>
+  <div id="cross">
+    <button data-a="rotate" aria-label="Rotate (up)">▲</button>
+    <button data-a="left" aria-label="Left">◀</button>
+    <button data-a="right" aria-label="Right">▶</button>
+    <button data-a="down" aria-label="Down">▼</button>
+  </div>
+  <div id="ab">
+    <div><button data-a="drop" aria-label="Drop">⤓</button>DROP</div>
+    <div><button data-a="rotate" aria-label="Rotate">⟳</button>ROTATE</div>
+  </div>
 </div>
 <script>
 // Tetris in one file. Keys: arrows/WASD (up or W or X rotates), space drops. On touch, use the
