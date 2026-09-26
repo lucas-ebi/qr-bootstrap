@@ -253,18 +253,23 @@ await answer(B, 'Escape');
 await A.keyboard.press('Escape');
 
 // ---- 4. Self-update over QR, and rollback --------------------------------------------------
+await text(A, lossy((await stream(signer, 'mjs', 'loader', coreAt(BUNDLED), BUNDLED, 1200)).frames));
+check('receiving the loader already running says it is up to date', /LOADER UP TO DATE/.test(await dialog(A)));
+await answer(A, 'Enter');
+check('and stores nothing', !(await A.evaluate(() => window.qrboot.boot.db.get('app:loader'))));
+await text(A, lossy((await stream(signer, 'mjs', 'loader', coreAt(50), 50, 1200)).frames));
+check('an older loader is ignored, visibly', /OLDER LOADER IGNORED/.test(await dialog(A)));
+await answer(A, 'Enter');
+
 await text(A, lossy(core200.frames));
 check('a loader update asks first', /UPDATE THE LOADER TO V200/i.test(await dialog(A)));
-await answer(A, 'y');
-check('then offers a restart', /LOADER UPDATED/.test(await dialog(A)));
-await Promise.all([A.waitForNavigation(), A.keyboard.press('r')]);
+await Promise.all([A.waitForNavigation({ timeout: 10000 }), A.keyboard.press('y')]);
 await ready(A);
 check('after the restart the new core runs', /CORE 200 \(STORED\)/.test(await logText(A)) && (await A.evaluate(() => globalThis.__core)) === 200);
 await shot(A, 'updated');
 
-await text(A, lossy(core300.frames));
-check('a later update from the same signer needs no approval, only the restart', /LOADER UPDATED/.test(await dialog(A)));
-await Promise.all([A.waitForNavigation(), A.keyboard.press('r')]);
+await Promise.all([A.waitForNavigation({ timeout: 15000 }), text(A, lossy(core300.frames))]);
+check('a later update from the same signer installs and restarts by itself', true);
 await ready(A);
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
