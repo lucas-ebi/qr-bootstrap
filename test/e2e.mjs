@@ -35,6 +35,7 @@ const coreAt = (v, extra = '') => coreSrc.replace('export const VERSION = 0;', `
 const core200 = await stream(signer, 'mjs', 'loader', coreAt(200, 'globalThis.__core = 200;'), 200, 1200);
 const core300 = await stream(signer, 'mjs', 'loader', coreAt(300, 'throw new Error("broken core");'), 300, 1200);
 const snakeGif = encodeGif(renderFrames(snake.frames.slice(0, 40), { scale: 4 }), { delay: 10 });
+const snake2Gif = encodeGif(renderFrames((await stream(signer, 'html', 'snake', await readFile(new URL('examples/snake.html', root)), 2)).frames.slice(0, 40), { scale: 4 }), { delay: 10 });
 
 const MIME = { html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', json: 'application/json', png: 'image/png', wasm: 'application/wasm' };
 const trusted = [signer, otherSigner].map(k => `'${k.publicKey}'`).join(', ');
@@ -180,7 +181,7 @@ await A.click('#app .bar button');
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir = await A.textContent('#lib');
-check('the library lists the loader and the received apps', /MJS V100 BUNDLED/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /TX: TRANSMIT/.test(dir) && !/AMBER|RESET/.test(dir), dir.replace(/\s+/g, ' ').slice(0, 160));
+check('the library lists the loader and the received apps', /MJS V100 BUNDLED/.test(dir) && /snake/i.test(dir) && /demo/i.test(dir) && /TX: TRANSMIT/.test(dir) && !/AMBER/.test(dir) && (await A.locator('#lib button[data-a="reset"]').count()) === 0, dir.replace(/\s+/g, ' ').slice(0, 160));
 await shot(A, 'library');
 await A.click('#lib button[data-a="close"]');
 check('tapping CLOSE closes the library', await A.locator('#lib').isHidden());
@@ -252,30 +253,36 @@ await answer(B, 'Escape');
 await A.keyboard.press('Escape');
 
 // ---- 4. Self-update over QR, and rollback --------------------------------------------------
+await text(A, lossy((await stream(signer, 'mjs', 'loader', coreAt(BUNDLED), BUNDLED, 1200)).frames));
+check('receiving the loader already running says it is up to date', /LOADER UP TO DATE/.test(await dialog(A)));
+await answer(A, 'Enter');
+check('and stores nothing', !(await A.evaluate(() => window.qrboot.boot.db.get('app:loader'))));
+await text(A, lossy((await stream(signer, 'mjs', 'loader', coreAt(50), 50, 1200)).frames));
+check('an older loader is ignored, visibly', /OLDER LOADER IGNORED/.test(await dialog(A)));
+await answer(A, 'Enter');
+
 await text(A, lossy(core200.frames));
 check('a loader update asks first', /UPDATE THE LOADER TO V200/i.test(await dialog(A)));
-await answer(A, 'y');
-check('then offers a restart', /LOADER UPDATED/.test(await dialog(A)));
-await Promise.all([A.waitForNavigation(), A.keyboard.press('r')]);
+await Promise.all([A.waitForNavigation({ timeout: 10000 }), A.keyboard.press('y')]);
 await ready(A);
 check('after the restart the new core runs', /CORE 200 \(STORED\)/.test(await logText(A)) && (await A.evaluate(() => globalThis.__core)) === 200);
 await shot(A, 'updated');
 
-await text(A, lossy(core300.frames));
-check('a later update from the same signer needs no approval, only the restart', /LOADER UPDATED/.test(await dialog(A)));
-await Promise.all([A.waitForNavigation(), A.keyboard.press('r')]);
+await Promise.all([A.waitForNavigation({ timeout: 15000 }), text(A, lossy(core300.frames))]);
+check('a later update from the same signer installs and restarts by itself', true);
 await ready(A);
 await A.keyboard.press('l');
 await A.waitForSelector('#lib:not(.hidden)');
 const dir2 = await A.textContent('#lib');
 check('a core that fails to start is marked bad and the built-in one returns', /V100 BUNDLED, FAILED: 300/i.test(dir2), dir2.replace(/\s+/g, ' ').slice(0, 160));
+check('RESET sits in the loader\'s row', (await A.locator('#lib .item').first().locator('button[data-a="reset"]').count()) === 1);
 await A.click('#lib button[data-a="reset"]');
 check('RESET LOADER asks first', /RESET LOADER/.test(await dialog(A)));
 await Promise.all([A.waitForNavigation(), A.keyboard.press('r')]);
 await ready(A);
 await A.click('#b-lib');
 await A.waitForSelector('#lib:not(.hidden)');
-check('and then the stored loader is gone', !/RESET|FAILED/.test(await A.textContent('#lib')));
+check('and then the stored loader is gone', !/FAILED/.test(await A.textContent('#lib')) && (await A.locator('#lib button[data-a="reset"]').count()) === 0);
 await A.click('#lib button[data-a="close"]');
 
 // A new deployment appears on the first reload, not the second
@@ -362,10 +369,25 @@ const fits = await tf.evaluate(() => ['#board', '#pad', '#side'].map(s => { cons
 check('tetris fits a 390x844 phone with its buttons', fits.every(Boolean), JSON.stringify(fits));
 const barOk = await C.evaluate(() => document.querySelector('#app .bar button').getBoundingClientRect().bottom <= document.querySelector('#app iframe').getBoundingClientRect().top);
 check('the close button sits in its own bar, above the app, not over it', barOk);
-await tf.locator('button[aria-label="Drop"]').tap();
+check('tetris: the pad is just the four arrows', (await tf.locator('#pad button').count()) === 4);
+const padStyle = f => f.evaluate(() => [...document.querySelectorAll('#pad button')].map(b => { const r = b.getBoundingClientRect(), c = getComputedStyle(b); return [b.textContent, Math.round(r.width), Math.round(r.height), c.fontSize, c.borderTopWidth, c.color]; }).sort().join('|'));
+const tetrisPad = await padStyle(tf);
+await tf.locator('button[aria-label="Down"]').tap();
+await tf.locator('button[aria-label="Down"]').tap();
 await C.waitForTimeout(150);
-check('tetris: tapping Drop scores', /^Tetris [1-9]/.test(await tf.title()), await tf.title());
+check('tetris: a double tap on ▼ drops the piece and scores', /^Tetris [1-9]/.test(await tf.title()), await tf.title());
 await shot(C, 'tetris-phone');
+await C.click('#app .bar button');
+await C.setInputFiles('#f-open', { name: 'snake2.gif', mimeType: 'image/gif', buffer: Buffer.from(snake2Gif) });
+await dialog(C);
+await answer(C, 'y');
+const sf = await (await C.waitForSelector('#app iframe')).contentFrame();
+await sf.waitForSelector('#pad');
+const snakePad = await padStyle(sf);
+check('snake and tetris use the same arrow pad', snakePad === tetrisPad, snakePad === tetrisPad ? '' : `${snakePad} vs ${tetrisPad}`);
+const snakeFits = await sf.evaluate(() => ['#c', '#pad', '#info'].every(s => { const r = document.querySelector(s).getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
+check('snake fits a 390x844 phone with its arrows', snakeFits);
+await shot(C, 'snake-phone');
 await C.click('#app .bar button');
 
 // Phone: the transmit view fits, and a GIF can be exported

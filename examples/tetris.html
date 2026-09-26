@@ -18,21 +18,15 @@
   #side b { color: #b6ffc9; font-weight: normal; }
   #next { width: 100px; height: 100px; margin-bottom: 6px; }
   #hint { font-size: 12px; line-height: 1.3; }
-  /* Game Boy layout: a cross on the left, two round buttons on the right. */
-  #pad { display: none; width: min(100%, 400px); padding: 0 16px; box-sizing: border-box; justify-content: space-between; align-items: center; }
-  @media (pointer: coarse) { #pad { display: flex; } }
+  /* A cross of arrows: up rotates, down falls (double tap drops). */
+  #pad { display: none; grid-template: repeat(3, 60px) / repeat(3, 60px); gap: 2px; justify-content: center; }
+  @media (pointer: coarse) { #pad { display: grid; } }
   #pad button {
-    font: inherit; color: #33ff66; background: #050805; touch-action: none; border: 2px solid #33ff66; padding: 0;
+    font: inherit; font-size: 26px; color: #33ff66; background: #050805; touch-action: none; border: 2px solid #33ff66; padding: 0;
   }
   #pad button:active { background: #33ff66; color: #050805; }
-  #cross { display: grid; grid-template: repeat(3, 52px) / repeat(3, 52px); gap: 2px; }
-  #cross button { font-size: 24px; }
-  #cross [data-a=rotate] { grid-area: 1 / 2; } #cross [data-a=left] { grid-area: 2 / 1; }
-  #cross [data-a=right] { grid-area: 2 / 3; } #cross [data-a=down] { grid-area: 3 / 2; }
-  #ab { display: flex; gap: 18px; align-items: flex-start; }
-  #ab div { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; }
-  #ab div:first-child { margin-top: 34px; }
-  #ab button { width: 72px; height: 72px; border-radius: 50%; font-size: 28px; }
+  #pad [data-a=rotate] { grid-area: 1 / 2; } #pad [data-a=left] { grid-area: 2 / 1; }
+  #pad [data-a=right] { grid-area: 2 / 3; } #pad [data-a=down] { grid-area: 3 / 2; }
 </style>
 <div id="main">
   <canvas id="board" width="300" height="600"></canvas>
@@ -45,20 +39,15 @@
   </div>
 </div>
 <div id="pad">
-  <div id="cross">
-    <button data-a="rotate" aria-label="Rotate (up)">▲</button>
-    <button data-a="left" aria-label="Left">◀</button>
-    <button data-a="right" aria-label="Right">▶</button>
-    <button data-a="down" aria-label="Down">▼</button>
-  </div>
-  <div id="ab">
-    <div><button data-a="drop" aria-label="Drop">⤓</button>DROP</div>
-    <div><button data-a="rotate" aria-label="Rotate">⟳</button>ROTATE</div>
-  </div>
+  <button data-a="rotate" aria-label="Rotate">▲</button>
+  <button data-a="left" aria-label="Left">◀</button>
+  <button data-a="right" aria-label="Right">▶</button>
+  <button data-a="down" aria-label="Down">▼</button>
 </div>
 <script>
-// Tetris in one file. Keys: arrows/WASD (up or W or X rotates), space drops. On touch, use the
-// buttons (hold ◀ ▶ ▼ to repeat) or tap the board to rotate. After game over, tap or press any key.
+// Tetris in one file. Keys: arrows/WASD (up or W or X rotates), space drops. On touch, the arrows:
+// ▲ rotates, hold ◀ ▶ ▼ to repeat, double-tap ▼ to drop; tapping the board also rotates.
+// After game over, tap or press any key.
 const W = 10, H = 20, C = 30;
 const COLORS = ['#33ff66', '#b6ffc9', '#2bd957', '#8affa8', '#1fb347', '#5cff85', '#47eb73']; // I O T S Z J L, in phosphor
 const SHAPES = [
@@ -166,7 +155,7 @@ function draw() {
   text('score', score);
   text('level', level);
   text('lines', lines);
-  text('hint', dead ? (touch ? 'GAME OVER - TAP TO RESTART' : 'GAME OVER - PRESS ANY KEY') : (touch ? 'TAP THE BOARD TO ROTATE' : '← → MOVE, ↑ ROTATE, SPACE DROPS'));
+  text('hint', dead ? (touch ? 'GAME OVER - TAP TO RESTART' : 'GAME OVER - PRESS ANY KEY') : (touch ? '▲ ROTATE · ▼▼ DROP' : '← → MOVE, ↑ ROTATE, SPACE DROPS'));
   document.title = 'Tetris ' + score + (dead ? ' (game over)' : '');
 }
 
@@ -189,11 +178,14 @@ addEventListener('keydown', e => {
   if (a) act(a); else if (dead) reset();
 });
 
-let timer;
+let timer, lastDown = -1e9;
 const stop = () => { clearTimeout(timer); clearInterval(timer); };
 $('pad').addEventListener('pointerdown', e => {
-  const a = e.target.closest('button')?.dataset.a;
+  let a = e.target.closest('button')?.dataset.a;
   if (!a) return;
+  if (a === 'down') { // a second tap on ▼ within 300 ms drops the piece
+    if (e.timeStamp - lastDown < 300) { a = 'drop'; lastDown = -1e9; } else lastDown = e.timeStamp;
+  }
   act(a);
   stop();
   if (a === 'left' || a === 'right' || a === 'down') timer = setTimeout(() => { timer = setInterval(() => act(a), 70); }, 220);

@@ -82,6 +82,7 @@ export async function start(boot) {
   boot.log = log;
   log(`QR BOOTSTRAP CORE ${VERSION} (${boot.source.toUpperCase()})`);
   log(`PROTOCOL ${F.PROTOCOL}`);
+  if (!navigator.standalone && !matchMedia('(display-mode: standalone)').matches) log('TIP: SHARE > ADD TO HOME SCREEN KEEPS THE LOADER WORKING OFFLINE');
   log(boot.keys.length ? `TRUSTED KEY ${boot.keys.map(k => k.slice(0, 8)).join(' ')}` : 'NO TRUSTED KEY: CODE WILL BE REFUSED');
 
   // ---- Dialogs (Y/N on a keyboard) -------------------------------------------------
@@ -191,6 +192,11 @@ export async function start(boot) {
   }
 
   async function receivedCode({ id: sid, container, opened: o }) {
+    if (o.id === 'loader' && o.version <= boot.version) { // nothing to install: say so, keep nothing
+      const same = o.version === boot.version;
+      log(same ? `LOADER V${o.version}: UP TO DATE` : `LOADER V${o.version}: OLDER THAN THE RUNNING V${boot.version}, IGNORED`);
+      return ask(same ? 'LOADER UP TO DATE' : 'OLDER LOADER IGNORED', same ? `This phone already runs version ${o.version}.` : `This phone runs version ${boot.version}, which is newer than ${o.version}.`, 'OK', '');
+    }
     const top = (await db.get('v:' + o.id)) ?? 0;
     if (o.version < top) return log(`REFUSED "${o.id}" V${o.version}: OLDER THAN V${top}`);
     if ((await db.get('ok:' + o.id)) !== o.signer) {
@@ -207,9 +213,10 @@ export async function start(boot) {
       await db.put('app:' + o.id, { id: o.id, type: o.type, version: o.version, signer: o.signer, container, size: container.length, time: Date.now() });
     }
     if (o.id !== 'loader') return run(o);
-    if (o.version <= boot.version) return log(`LOADER V${o.version} STORED; RUNNING V${boot.version} IS NOT OLDER`);
-    log(`LOADER V${o.version} STORED`);
-    if (await ask('LOADER UPDATED', `Version ${o.version} starts on the next launch. If it fails, version ${boot.version} comes back.`, 'RESTART', 'LATER')) location.reload();
+    // A newer loader: installed, and started at once. If it fails to start, boot.js brings back this one.
+    log(`LOADER V${o.version} INSTALLED; RESTARTING`);
+    status(`INSTALLING LOADER V${o.version}...`);
+    setTimeout(() => location.reload(), 1200);
   }
 
   async function receivedFile({ id: sid, container, file }) {
@@ -282,13 +289,13 @@ export async function start(boot) {
       (open ? btn('open', key, open) : '') + btn('tx', key, 'TX') + btn('gif', key, 'GIF') + (key !== 'loader' ? btn('del', key, 'DEL') : '') + '</div></div>';
     const loader = `<div class="item">LOADER<br><span class="dim">MJS V${boot.version} ${boot.source === 'stored' ? 'STORED' : 'BUNDLED'}` +
       `${boot.bad.length ? ', FAILED: ' + boot.bad.join(' ') : ''}</span>` +
-      (lc ? `<div class="row">${btn('tx', 'loader', 'TX')}${btn('gif', 'loader', 'GIF')}</div>` : '') + '</div>';
+      '<div class="row">' + (lc ? btn('tx', 'loader', 'TX') + btn('gif', 'loader', 'GIF') : '') +
+      (boot.source === 'stored' || boot.bad.length ? btn('reset', 'loader', 'RESET') : '') + '</div></div>';
     el.innerHTML = `<div class="box"><h2>DIR</h2>` +
-      `<p class="dim">RUN: START · TX: TRANSMIT AS QR STREAM · GIF: SAVE STREAM AS GIF · DEL: DELETE · BUNDLED: SHIPPED WITH THE SITE · STORED: RECEIVED OVER QR · V: SIGNING TIME</p>` + loader +
+      `<p class="dim">RUN: START · TX: TRANSMIT AS QR STREAM · GIF: SAVE STREAM AS GIF · DEL: DELETE · RESET: BACK TO THE BUNDLED LOADER · BUNDLED: SHIPPED WITH THE SITE · STORED: RECEIVED OVER QR · V: SIGNING TIME</p>` + loader +
       apps.map(a => item(a.id, `${a.type} V${a.version} ${kb(a.size)}`, 'app:' + a.id, 'RUN')).join('') +
       files.map(f => item(f.name, `${f.mime} ${kb(f.size)}`, 'file:' + f.id, 'SAVE')).join('') +
       `<p class="dim">${apps.length + files.length + 1} ENTRIES</p><div class="row" style="margin-top:14px"><button data-a="send"><b>S</b>END FILE</button>` +
-      (boot.source === 'stored' || boot.bad.length ? '<button data-a="reset">RESET LOADER</button>' : '') +
       `<button data-a="close">[<b>X</b>] CLOSE</button></div></div>`;
     el.classList.remove('hidden');
     el.onclick = async e => {

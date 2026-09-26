@@ -4,7 +4,7 @@
 <style>
   /* Phosphor terminal, like the loader. */
   :root { --s: min(94vw, 88vh); }
-  @media (pointer: coarse) { :root { --s: min(94vw, 56vh); } }
+  @media (pointer: coarse) { :root { --s: min(94vw, 52vh); } }
   html, body {
     margin: 0; height: 100%; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
     background: #050805; color: #33ff66; text-transform: uppercase; text-shadow: 0 0 4px #33ff6699;
@@ -13,16 +13,15 @@
   body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
   canvas { width: var(--s); height: var(--s); box-sizing: border-box; border: 2px solid #33ff66; image-rendering: pixelated; }
   #info { width: var(--s); display: flex; justify-content: space-between; }
-  #pad { display: none; grid-template: repeat(2, 72px) / repeat(3, 72px); gap: 6px; }
+  /* The same cross of arrows as Tetris. */
+  #pad { display: none; grid-template: repeat(3, 60px) / repeat(3, 60px); gap: 2px; justify-content: center; }
   @media (pointer: coarse) { #pad { display: grid; } }
   #pad button {
-    font: inherit; font-size: 30px; color: #33ff66; background: #050805; touch-action: none; border: 2px solid #33ff66;
+    font: inherit; font-size: 26px; color: #33ff66; background: #050805; touch-action: none; border: 2px solid #33ff66; padding: 0;
   }
   #pad button:active { background: #33ff66; color: #050805; }
-  #pad [data-d="0,-1"] { grid-area: 1 / 2; }
-  #pad [data-d="-1,0"] { grid-area: 2 / 1; }
-  #pad [data-d="0,1"] { grid-area: 2 / 2; }
-  #pad [data-d="1,0"] { grid-area: 2 / 3; }
+  #pad [data-d="0,-1"] { grid-area: 1 / 2; } #pad [data-d="-1,0"] { grid-area: 2 / 1; }
+  #pad [data-d="1,0"] { grid-area: 2 / 3; } #pad [data-d="0,1"] { grid-area: 3 / 2; }
 </style>
 <div id="info"><span id="score">SCORE 0000</span><span id="hint"></span></div>
 <canvas id="c" width="400" height="400"></canvas>
