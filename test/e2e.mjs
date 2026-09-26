@@ -174,7 +174,7 @@ await A.waitForTimeout(250);
 const s2 = await snakeCells(game);
 check('snake responds to the keyboard inside the sandbox', s1.length > 0 && JSON.stringify(s1) !== JSON.stringify(s2) && new Set(s2.map(c => c[0])).size === 1, `${JSON.stringify(s1)} -> ${JSON.stringify(s2)}`);
 await shot(A, 'snake');
-await A.click('#app > button');
+await A.click('#app .bar button');
 
 // ---- 3. Library, transmission to a second device, file transfer -------------------------------
 await A.keyboard.press('l');
@@ -360,11 +360,13 @@ const tf = await (await C.waitForSelector('#app iframe')).contentFrame();
 await tf.waitForSelector('#board');
 const fits = await tf.evaluate(() => ['#board', '#pad', '#side'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }));
 check('tetris fits a 390x844 phone with its buttons', fits.every(Boolean), JSON.stringify(fits));
+const barOk = await C.evaluate(() => document.querySelector('#app .bar button').getBoundingClientRect().bottom <= document.querySelector('#app iframe').getBoundingClientRect().top);
+check('the close button sits in its own bar, above the app, not over it', barOk);
 await tf.locator('button[aria-label="Drop"]').tap();
 await C.waitForTimeout(150);
 check('tetris: tapping Drop scores', /^Tetris [1-9]/.test(await tf.title()), await tf.title());
 await shot(C, 'tetris-phone');
-await C.click('#app > button');
+await C.click('#app .bar button');
 
 // Phone: the transmit view fits, and a GIF can be exported
 await C.click('#b-lib');

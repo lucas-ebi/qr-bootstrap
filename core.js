@@ -40,8 +40,11 @@ button b { text-decoration: underline; font-weight: inherit; }
 #codes { flex: 1; width: 100%; display: grid; gap: 12px; place-content: center; }
 #codes canvas { image-rendering: pixelated; background: #fff; border: 2px solid var(--fg); }
 #tx .st { color: var(--hi); white-space: pre-wrap; text-align: center; }
-#app { z-index: 15; padding: 0; } #app iframe { width: 100%; height: 100%; border: 0; background: #000; }
-#app > button { position: fixed; top: max(10px, env(safe-area-inset-top)); right: 10px; z-index: 1; }
+#app { z-index: 15; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+#app iframe { flex: 1; width: 100%; border: 0; background: var(--bg); }
+#app .bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 2px solid var(--fg);
+  padding: max(6px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left)); }
+#app .bar button { padding: 4px 10px; }
 .media { max-width: 100%; max-height: 50vh; display: block; margin: 0 auto 12px; border: 2px solid var(--fg); }
 .hidden { display: none !important; }
 @media (prefers-reduced-motion: reduce) { #status::after { animation: none; } }
@@ -229,16 +232,19 @@ export async function start(boot) {
     if (type === 'json') { modules.set(id, JSON.parse(text)); return log(`LOADED "${id}"`); }
     if (type === 'html') { // opaque origin: no access to this page's storage, cache or keys
       paused = true;
-      const app = document.createElement('div'), frame = document.createElement('iframe'), close = document.createElement('button');
+      const app = document.createElement('div'), bar = document.createElement('div'), frame = document.createElement('iframe'), close = document.createElement('button');
       app.id = 'app';
       app.className = 'layer';
+      bar.className = 'bar';
+      bar.textContent = `RUN "${id}"`; // a bar of its own, so the button never covers the app
       frame.setAttribute('sandbox', 'allow-scripts');
       frame.title = id;
       frame.srcdoc = text;
       close.textContent = '[X]';
       close.setAttribute('aria-label', 'Close ' + id);
       close.onclick = () => { app.remove(); $('lines').classList.remove('hidden'); paused = false; };
-      app.append(frame, close);
+      bar.append(close);
+      app.append(bar, frame);
       document.body.append(app);
       $('lines').classList.add('hidden'); // the scanlines would stripe the app's own graphics
       frame.focus();
@@ -270,7 +276,7 @@ export async function start(boot) {
 
   async function library() {
     const apps = (await db.list('app:')).filter(a => a.id !== 'loader'), files = await db.list('file:');
-    const lc = await loaderContainer(), stored = await db.get('app:loader'), el = $('lib');
+    const lc = await loaderContainer(), el = $('lib');
     const btn = (a, key, label) => `<button data-a="${a}" data-k="${key}">${label}</button>`;
     const item = (name, what, key, open) => `<div class="item">${esc(name)}<br><span class="dim">${esc(what)}</span><div class="row">` +
       (open ? btn('open', key, open) : '') + btn('tx', key, 'TX') + btn('gif', key, 'GIF') + (key !== 'loader' ? btn('del', key, 'DEL') : '') + '</div></div>';
@@ -282,7 +288,7 @@ export async function start(boot) {
       apps.map(a => item(a.id, `${a.type} V${a.version} ${kb(a.size)}`, 'app:' + a.id, 'RUN')).join('') +
       files.map(f => item(f.name, `${f.mime} ${kb(f.size)}`, 'file:' + f.id, 'SAVE')).join('') +
       `<p class="dim">${apps.length + files.length + 1} ENTRIES</p><div class="row" style="margin-top:14px"><button data-a="send"><b>S</b>END FILE</button>` +
-      (stored || boot.bad.length ? '<button data-a="reset">RESET LOADER</button>' : '') +
+      (boot.source === 'stored' || boot.bad.length ? '<button data-a="reset">RESET LOADER</button>' : '') +
       `<button data-a="close">[<b>X</b>] CLOSE</button></div></div>`;
     el.classList.remove('hidden');
     el.onclick = async e => {
